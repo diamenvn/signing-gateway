@@ -355,9 +355,9 @@ public class CngUserSignature : IExternalSignature
                             using (var rsaCngSilent = new RSACng(cngKey))
                             {
                                 Console.WriteLine("[DEBUG] Dang ky bang RSACng Silent...");
-                                byte[] sig = rsaCngSilent.SignData(message, new HashAlgorithmName(_hashAlgorithm), RSASignaturePadding.Pkcs1);
+                                byte[] signatureSilent = rsaCngSilent.SignData(message, new HashAlgorithmName(_hashAlgorithm), RSASignaturePadding.Pkcs1);
                                 Console.WriteLine("[DEBUG] Ky bang RSACng Silent thanh cong.");
-                                return sig;
+                                return signatureSilent;
                             }
                         }
                     }
