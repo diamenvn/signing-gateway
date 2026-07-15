@@ -1468,6 +1468,7 @@ async function signPdfNative(cfg, pdfBase64, opts) {
 
     // 2. Lay image va ghi file anh tam
     const rawImage = opts.imageBase64 || cfg.signatureImageBase64 || null;
+    log('info', `[DEBUG] rawImage nhan duoc co do dai: ${rawImage ? rawImage.length : 0}`);
     if (rawImage) {
       const cleanImage = typeof rawImage === 'string'
         ? rawImage.replace(/^data:image\/[a-z]+;base64,/i, '')
@@ -1475,6 +1476,7 @@ async function signPdfNative(cfg, pdfBase64, opts) {
       if (cleanImage) {
         imagePath = path.join(tempDir, `img_${uniqueId}.png`);
         fs.writeFileSync(imagePath, Buffer.from(cleanImage, 'base64'));
+        log('info', `[DEBUG] Da ghi file anh tam ra duong dan: ${imagePath}`);
       }
     }
 
@@ -1515,6 +1517,11 @@ async function signPdfNative(cfg, pdfBase64, opts) {
     const color = opts.color || cfg.signatureColor || '';
     if (color) {
       args.push('--color', color);
+    }
+
+    const tsize = opts.sigTextSize || opts.SigTextSize || cfg.sigTextSize || '';
+    if (tsize) {
+      args.push('--tsize', String(tsize));
     }
 
     // 5. Thuc thi file .exe

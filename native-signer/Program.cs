@@ -29,6 +29,7 @@ class Program
         string desc = null;
         string image = null;
         string colorStr = null;
+        float tsize = 8.5f;
 
         bool listOnly = false;
         bool testPkcs11 = false;
@@ -50,6 +51,7 @@ class Program
             else if (args[i] == "--desc" && i + 1 < args.Length) desc = args[++i];
             else if (args[i] == "--image" && i + 1 < args.Length) image = args[++i];
             else if (args[i] == "--color" && i + 1 < args.Length) colorStr = args[++i];
+            else if (args[i] == "--tsize" && i + 1 < args.Length) float.TryParse(args[++i], out tsize);
         }
 
         if (listOnly)
@@ -241,7 +243,7 @@ class Program
 
             Console.WriteLine($"[INFO] Da tim thay chung thu: {cert.Subject}");
             Console.WriteLine($"[INFO] Dang tien hanh ky file PDF: {input} -> {output}...");
-            SignPdf(input, output, cert, pin, page, llx, lly, urx, ury, desc, image, colorStr);
+            SignPdf(input, output, cert, pin, page, llx, lly, urx, ury, desc, image, colorStr, tsize);
             Console.WriteLine("[INFO] Ky so thanh cong!");
             return 0;
         }
@@ -300,7 +302,8 @@ class Program
         float ury, 
         string description, 
         string imagePath,
-        string colorStr)
+        string colorStr,
+        float tsize)
     {
         Console.WriteLine("[DEBUG] Bat dau SignPdf...");
         // 1. Dung chuoi chung thu (cert chain)
@@ -353,7 +356,9 @@ class Program
             }
 
             // Chen hinh anh ben trai va text ben phai neu co anh
+            Console.WriteLine($"[DEBUG] Nhan duoc imagePath: '{imagePath}'");
             bool hasImage = !string.IsNullOrEmpty(imagePath) && File.Exists(imagePath);
+            Console.WriteLine($"[DEBUG] hasImage: {hasImage} (File.Exists: {(!string.IsNullOrEmpty(imagePath) && File.Exists(imagePath))})");
             appearance.SignatureRenderingMode = PdfSignatureAppearance.RenderingMode.DESCRIPTION;
             appearance.Acro6Layers = true;
 
@@ -492,7 +497,7 @@ class Program
                 }
             }
 
-            Font font = new Font(bf, 8.5f, Font.NORMAL, textColor);
+            Font font = new Font(bf, tsize, Font.NORMAL, textColor);
             ColumnText ct = new ColumnText(layer2);
             
             float textLeft = 3;
@@ -501,7 +506,8 @@ class Program
                 textLeft = (w / 2) + 3;
             }
 
-            ct.SetSimpleColumn(new Phrase(text, font), textLeft, 0, w - 3, h - 2, 11, Element.ALIGN_LEFT);
+            float leading = tsize * 1.25f;
+            ct.SetSimpleColumn(new Phrase(text, font), textLeft, 0, w - 3, h - 2, leading, Element.ALIGN_LEFT);
             ct.Go();
 
             // Thuc hien ky so detached CMS

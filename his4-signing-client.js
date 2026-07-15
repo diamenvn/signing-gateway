@@ -74,6 +74,7 @@ export async function signPdf(pdf, opts = {}) {
         setImageBackground: opts.setImageBackground ?? undefined,
         pin: opts.pin ?? undefined,
         color: opts.color ?? undefined,
+        sigTextSize: opts.sigTextSize ?? undefined,
       },
     }),
   });
