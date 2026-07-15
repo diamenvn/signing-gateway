@@ -214,7 +214,17 @@ public class CngUserSignature : IExternalSignature
         IntPtr pvData,
         ref int pcbData);
 
+    [DllImport("advapi32.dll", CharSet = CharSet.Ansi, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool CryptSetProvParam(
+        IntPtr hProv,
+        uint dwParam,
+        [In] byte[] pbData,
+        uint dwFlags);
+
     private const int CERT_KEY_PROV_INFO_PROP_ID = 2;
+    private const uint PP_KEYEXCHANGE_PIN = 32;
+    private const uint PP_SIGNATURE_PIN = 33;
 
     private X509Certificate2 _cert;
     private string _pin;
@@ -409,6 +419,23 @@ public class CngUserSignature : IExternalSignature
 
             using (var rsaCsp = new RSACryptoServiceProvider(cspParams))
             {
+                if (!string.IsNullOrEmpty(_pin))
+                {
+                    Console.WriteLine("[DEBUG] Thiet lap PIN qua CryptSetProvParam...");
+                    try
+                    {
+                        byte[] pinBytes = Encoding.ASCII.GetBytes(_pin + '\0');
+                        IntPtr hProv = rsaCsp.SafeProvHandle.DangerousGetHandle();
+                        bool retSig = CryptSetProvParam(hProv, PP_SIGNATURE_PIN, pinBytes, 0);
+                        bool retKey = CryptSetProvParam(hProv, PP_KEYEXCHANGE_PIN, pinBytes, 0);
+                        Console.WriteLine($"[DEBUG] CryptSetProvParam PP_SIGNATURE_PIN: {retSig}, PP_KEYEXCHANGE_PIN: {retKey}");
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"[DEBUG] Loi thiet lap PIN qua CryptSetProvParam: {ex.Message}");
+                    }
+                }
+
                 Console.WriteLine("[DEBUG] Dang ky bang RSACryptoServiceProvider...");
                 byte[] sig = rsaCsp.SignData(message, new HashAlgorithmName(_hashAlgorithm), RSASignaturePadding.Pkcs1);
                 Console.WriteLine("[DEBUG] Ky thanh cong.");
