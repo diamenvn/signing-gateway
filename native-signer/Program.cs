@@ -286,10 +286,9 @@ class Program
         {
             if (Directory.Exists(dir))
             {
-                // Uu tien ban silent (_s.dll)
-                string silentPath = Path.Combine(dir, pattern + "_s.dll");
-                if (File.Exists(silentPath)) return silentPath;
-
+                // Chỉ load bản DLL thường vì kết quả quét PE xuất khẩu cho thấy
+                // chỉ bản thường mới hỗ trợ chuẩn PKCS#11 (chứa các hàm C_...),
+                // còn bản _s.dll chỉ là driver CSP thuần.
                 string normalPath = Path.Combine(dir, pattern + ".dll");
                 if (File.Exists(normalPath)) return normalPath;
             }
