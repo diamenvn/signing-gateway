@@ -124,7 +124,7 @@ class Program
                     return 1;
                 }
 
-                string pkcs11DllPath = FindCompatiblePkcs11Dll(cert);
+                string pkcs11DllPath = FindCompatiblePkcs11Dll(cert, pin);
                 if (pkcs11DllPath == null)
                 {
                     Console.Error.WriteLine("Khong tim thay DLL PKCS#11 phu hop cho chung thu nay.");
@@ -315,7 +315,7 @@ class Program
 
         // 2. Khoi tao doi tuong ky ngoai (IExternalSignature) ho tro PKCS#11, CNG va CSP
         IExternalSignature externalSignature;
-        string pkcs11DllPath = FindCompatiblePkcs11Dll(cert);
+        string pkcs11DllPath = FindCompatiblePkcs11Dll(cert, pin);
 
         if (pkcs11DllPath != null)
         {
@@ -376,7 +376,7 @@ class Program
         xmlDoc.PreserveWhitespace = true;
         xmlDoc.Load(inputPath);
 
-        string pkcs11DllPath = FindCompatiblePkcs11Dll(cert);
+        string pkcs11DllPath = FindCompatiblePkcs11Dll(cert, pin);
         RSA rsaKey = null;
 
         if (pkcs11DllPath != null)
@@ -440,7 +440,7 @@ class Program
         return cert.FriendlyName ?? subject;
     }
 
-    static string FindCompatiblePkcs11Dll(X509Certificate2 cert)
+    static string FindCompatiblePkcs11Dll(X509Certificate2 cert, string pin)
     {
         List<string> candidateDlls = new List<string>();
         string[] searchDirs = { 
@@ -476,7 +476,7 @@ class Program
         {
             try
             {
-                if (CheckIfDllContainsCert(dll, certRawData))
+                if (CheckIfDllContainsCert(dll, certRawData, pin))
                 {
                     Console.WriteLine($"[DEBUG] PKCS11: Tim thay DLL khop! -> {dll}");
                     return dll;
@@ -491,7 +491,7 @@ class Program
         return null;
     }
 
-    static bool CheckIfDllContainsCert(string dllPath, byte[] certRawData)
+    static bool CheckIfDllContainsCert(string dllPath, byte[] certRawData, string pin)
     {
         Console.WriteLine($"[DEBUG] PKCS11 Check: Loading {dllPath}...");
         IntPtr hModule = Win32.LoadLibrary(dllPath);
@@ -512,10 +512,12 @@ class Program
             var cFindObjects = GetFuncLocal<C_FindObjects>(hModule, "C_FindObjects");
             var cFindObjectsFinal = GetFuncLocal<C_FindObjectsFinal>(hModule, "C_FindObjectsFinal");
             var cGetAttributeValue = GetFuncLocal<C_GetAttributeValue>(hModule, "C_GetAttributeValue");
+            var cLogin = GetFuncLocal<C_Login>(hModule, "C_Login");
+            var cLogout = GetFuncLocal<C_Logout>(hModule, "C_Logout");
 
             if (cInitialize == null || cFinalize == null || cGetSlotList == null || cOpenSession == null || 
                 cCloseSession == null || cFindObjectsInit == null || cFindObjects == null || 
-                cFindObjectsFinal == null || cGetAttributeValue == null)
+                cFindObjectsFinal == null || cGetAttributeValue == null || cLogin == null || cLogout == null)
             {
                 Console.WriteLine($"[DEBUG] PKCS11 Check: DLL {dllPath} thieu ham PKCS11.");
                 return false;
@@ -561,8 +563,20 @@ class Program
                             continue;
                         }
 
+                        bool loggedIn = false;
                         try
                         {
+                            if (!string.IsNullOrEmpty(pin))
+                            {
+                                byte[] pinBytes = Encoding.ASCII.GetBytes(pin);
+                                uint loginRv = cLogin(hSession, Pkcs11Const.CKU_USER, pinBytes, (uint)pinBytes.Length);
+                                Console.WriteLine($"[DEBUG] PKCS11 Check: cLogin status: 0x{loginRv:X8}");
+                                if (loginRv == 0 || loginRv == 0x00000100)
+                                {
+                                    loggedIn = true;
+                                }
+                            }
+
                             IntPtr pClass = Marshal.AllocHGlobal(4);
                             Marshal.WriteInt32(pClass, 1); // CKO_CERTIFICATE = 1
                             try
@@ -652,6 +666,10 @@ class Program
                         }
                         finally
                         {
+                            if (loggedIn)
+                            {
+                                cLogout(hSession);
+                            }
                             cCloseSession(hSession);
                         }
                     }
