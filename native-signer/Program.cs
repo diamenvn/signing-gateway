@@ -1012,7 +1012,7 @@ public class Pkcs11Signature : IExternalSignature
                         Console.WriteLine("[DEBUG] Pkcs11: Logging in...");
                         byte[] pinBytes = Encoding.ASCII.GetBytes(_pin);
                         rv = cLogin(hSession, CKU_USER, pinBytes, (uint)pinBytes.Length);
-                        if (rv != 0)
+                        if (rv != 0 && rv != 0x00000100) // CKR_USER_ALREADY_LOGGED_IN = 0x00000100
                             throw new Exception($"C_Login failed (wrong PIN?): 0x{rv:X8}");
 
                         try
@@ -1208,7 +1208,7 @@ public class Pkcs11Signature : IExternalSignature
                     {
                         byte[] pinBytes = Encoding.ASCII.GetBytes(_pin);
                         rv = cLogin(hSession, CKU_USER, pinBytes, (uint)pinBytes.Length);
-                        if (rv != 0)
+                        if (rv != 0 && rv != 0x00000100) // CKR_USER_ALREADY_LOGGED_IN = 0x00000100
                             throw new Exception($"C_Login failed: 0x{rv:X8}");
 
                         try
