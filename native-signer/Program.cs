@@ -320,4 +320,3 @@ public class CngUserSignature : IExternalSignature
         }
     }
 }
-}
