@@ -67,6 +67,7 @@ class Program
         catch (Exception ex)
         {
             string msg = ex.Message;
+            Console.Error.WriteLine($"[DEBUG_RAW_ERR] {ex.ToString()}");
             if (msg.Contains("wrong PIN") || msg.Contains("incorrect PIN") || msg.Contains("PIN was presented") || msg.Contains("0x8009001A") || msg.Contains("context was acquired as silent"))
             {
                 Console.Error.WriteLine("WRONG_PIN: Ma PIN cua USB Token khong chinh xac hoac thieu ma PIN.");

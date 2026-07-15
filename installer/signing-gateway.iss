@@ -30,6 +30,8 @@ SolidCompression=yes
 WizardStyle=modern
 PrivilegesRequired=admin
 UninstallDisplayIcon={app}\{#ExeName}
+CloseApplications=no
+RestartApplications=no
 
 [Languages]
 Name: "en"; MessagesFile: "compiler:Default.isl"
@@ -93,6 +95,16 @@ var
   HasPluginSetup: Boolean;
   SavedTenantId, SavedSecret, SavedOrigin, SavedLicense: String;
   SavedTgToken, SavedTgChatId, SavedTunEnabled, SavedTunToken: String;
+
+function InitializeSetup(): Boolean;
+var
+  ResultCode: Integer;
+begin
+  Result := True;
+  // Truoc khi cai dat, dung va xoa task cu de tranh loi file lock hoac khoi chay lai bat thuong
+  Exec('schtasks', '/end /tn "SigningGateway"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Exec('schtasks', '/delete /tn "SigningGateway" /f', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+end;
 
 // "https://his4-dev.vnpthis.vn/" -> "his4-dev.vnpthis.vn"
 // SDK cua VNPT gui window.location.hostname, KHONG kem scheme.
