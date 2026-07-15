@@ -1522,13 +1522,18 @@ function extractEmbeddedSigner() {
     }
 
     let needsExtract = true;
-    if (fs.existsSync(targetExePath)) {
-      const embeddedStat = fs.statSync(embeddedExePath);
-      const targetStat = fs.statSync(targetExePath);
-      // Neu target exe tren dia co thoi gian ghi moi hon hoac bang thoi gian compile cua file nhung, va size giong nhau -> bo qua
-      if (targetStat.mtimeMs >= embeddedStat.mtimeMs && targetStat.size === embeddedStat.size) {
-        needsExtract = false;
+    // Luon ghi de chu dong khi cap nhat ban moi de tranh file gia lap trong pkg co timestamp cu hon file tren dia.
+    // Neu file dang bi khoa boi tien trinh khac, ta catch loi va ghi log thoi.
+    try {
+      if (fs.existsSync(targetExePath)) {
+        const embeddedStat = fs.statSync(embeddedExePath);
+        const targetStat = fs.statSync(targetExePath);
+        if (targetStat.size === embeddedStat.size) {
+          needsExtract = false;
+        }
       }
+    } catch (_) {
+      needsExtract = true;
     }
 
     if (needsExtract) {

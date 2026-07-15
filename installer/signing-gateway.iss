@@ -102,10 +102,10 @@ var
 begin
   Result := True;
   // Cuong buc dong moi instance signing-gateway.exe dang chay trong he thong
-  Exec('taskkill', '/F /IM signing-gateway.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Exec(ExpandConstant('{cmd}'), '/c taskkill /F /IM signing-gateway.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   // Truoc khi cai dat, dung va xoa task cu de tranh loi file lock hoac khoi chay lai bat thuong
-  Exec('schtasks', '/end /tn "SigningGateway"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-  Exec('schtasks', '/delete /tn "SigningGateway" /f', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Exec(ExpandConstant('{cmd}'), '/c schtasks /end /tn "SigningGateway"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Exec(ExpandConstant('{cmd}'), '/c schtasks /delete /tn "SigningGateway" /f', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
 end;
 
 // "https://his4-dev.vnpthis.vn/" -> "his4-dev.vnpthis.vn"
