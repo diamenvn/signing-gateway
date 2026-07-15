@@ -24,8 +24,7 @@ export async function checkGateway() {
   try {
     const r = await fetch(`${GATEWAY}/v2/health`, { mode: 'cors' });
     if (!r.ok) return { ok: false, reason: 'Gateway khong phan hoi' };
-    const resObj = await r.json();
-    const h = resObj.data;
+    const h = await r.json();
     if (h.plugin !== 'connected') return { ok: false, reason: 'May chu chua chay VNPT Plugin' };
     if (h.token === 'absent')     return { ok: false, reason: 'Chua cam USB Token' };
     if (h.token !== 'present')    return { ok: false, reason: 'Khong kiem tra duoc USB Token' };
@@ -77,14 +76,11 @@ export async function signPdf(pdf, opts = {}) {
     }),
   });
 
-  const resObj = await r.json();
-  if (r.status === 423) {
-    const retryAfterMs = (resObj.data && resObj.data.retryAfterMs) || 0;
-    throw new Error(`Token dang ban (nguoi khac ky). Thu lai sau ${Math.ceil(retryAfterMs / 1000)}s.`);
-  }
-  if (!r.ok) throw new Error(dienGiaiLoi(resObj.error_code));
+  const data = await r.json();
+  if (r.status === 423) throw new Error(`Token dang ban (nguoi khac ky). Thu lai sau ${Math.ceil((data.retryAfterMs||0)/1000)}s.`);
+  if (!r.ok) throw new Error(dienGiaiLoi(data.error));
 
-  return new Blob([fromBase64(resObj.data.document)], { type: 'application/pdf' });
+  return new Blob([fromBase64(data.document)], { type: 'application/pdf' });
 }
 
 /* ===================== KY CA LOAT (dung lock) ===================== */
@@ -99,14 +95,10 @@ export async function lock(hisToken) {
     method: 'POST', mode: 'cors',
     headers: { authorization: `Bearer ${token}` },
   });
-  const resObj = await r.json();
-  if (r.status === 423) {
-    const lockedBy = (resObj.data && resObj.data.lockedBy) || '';
-    const retryAfterMs = (resObj.data && resObj.data.retryAfterMs) || 0;
-    throw new Error(`Token dang ban (${lockedBy}). Thu lai sau ${Math.ceil(retryAfterMs / 1000)}s.`);
-  }
-  if (!r.ok) throw new Error(resObj.error_code);
-  return resObj.data; // { lockToken, expiresInMs, signCount }
+  const data = await r.json();
+  if (r.status === 423) throw new Error(`Token dang ban (${data.lockedBy}). Thu lai sau ${Math.ceil((data.retryAfterMs||0)/1000)}s.`);
+  if (!r.ok) throw new Error(data.error);
+  return data; // { lockToken, expiresInMs, signCount }
 }
 
 export async function unlock(lockToken, hisToken) {
@@ -116,7 +108,7 @@ export async function unlock(lockToken, hisToken) {
     headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
     body: JSON.stringify({ lockToken }),
   });
-  return r.ok ? (await r.json()).data : null;
+  return r.ok ? (await r.json()) : null;
 }
 
 /**
@@ -170,11 +162,8 @@ export async function signXml(xmlString, opts = {}) {
       },
     }),
   });
-  const resObj = await r.json();
-  if (r.status === 423) {
-    const retryAfterMs = (resObj.data && resObj.data.retryAfterMs) || 0;
-    throw new Error(`Token dang ban. Thu lai sau ${Math.ceil(retryAfterMs / 1000)}s.`);
-  }
-  if (!r.ok) throw new Error(dienGiaiLoi(resObj.error_code));
-  return resObj.data.document; // XML da ky
+  const data = await r.json();
+  if (r.status === 423) throw new Error(`Token dang ban. Thu lai sau ${Math.ceil((data.retryAfterMs||0)/1000)}s.`);
+  if (!r.ok) throw new Error(dienGiaiLoi(data.error));
+  return data.document; // XML da ky
 }
