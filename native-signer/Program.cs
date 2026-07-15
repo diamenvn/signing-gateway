@@ -105,11 +105,14 @@ class Program
         string description, 
         string imagePath)
     {
+        Console.WriteLine("[DEBUG] Bat dau SignPdf...");
         // 1. Dung chuoi chung thu (cert chain)
         X509Chain chainObj = new X509Chain();
         chainObj.ChainPolicy.RevocationMode = X509RevocationMode.NoCheck; // Tat kiem tra truc tuyen de tranh treo/timeout
         chainObj.ChainPolicy.VerificationFlags = X509VerificationFlags.AllFlags; // Bo qua xac thuc de chay nhanh offline
         chainObj.Build(cert);
+        Console.WriteLine("[DEBUG] Dung x509 chain xong. So luong cert: " + chainObj.ChainElements.Count);
+
         var chain = new Org.BouncyCastle.X509.X509Certificate[chainObj.ChainElements.Count];
         for (int i = 0; i < chainObj.ChainElements.Count; i++)
         {
@@ -125,6 +128,7 @@ class Program
         using (FileStream os = new FileStream(outputPath, FileMode.Create))
         using (PdfStamper stamper = PdfStamper.CreateSignature(reader, os, '\0'))
         {
+            Console.WriteLine("[DEBUG] Da mo PdfReader, FileStream, PdfStamper...");
             PdfSignatureAppearance appearance = stamper.SignatureAppearance;
             
             // Thiet lap vi tri chu ky visible
@@ -153,8 +157,11 @@ class Program
             }
 
             // Thuc hien ky so detached CMS
+            Console.WriteLine("[DEBUG] Dang goi MakeSignature.SignDetached...");
             MakeSignature.SignDetached(appearance, externalSignature, chain, null, null, null, 0, CryptoStandard.CMS);
+            Console.WriteLine("[DEBUG] Da goi xong MakeSignature.SignDetached...");
         }
+        Console.WriteLine("[DEBUG] Da dong va hoan tat PdfStamper.");
     }
 
     static string GetCertCN(X509Certificate2 cert)
@@ -197,21 +204,27 @@ public class CngUserSignature : IExternalSignature
 
     public byte[] Sign(byte[] message)
     {
+        Console.WriteLine("[DEBUG] Bat dau phuong thuc Sign...");
         using (RSA rsa = _cert.GetRSAPrivateKey())
         {
             if (rsa == null)
                 throw new Exception("Chung thu khong chua khoa bi mat RSA hop le.");
 
+            Console.WriteLine("[DEBUG] Loai doi tuong RSA nhan duoc: " + rsa.GetType().FullName);
+
             // 1. Thiet lap PIN cho khoa dang CNG (Key Storage Provider)
             if (rsa is RSACng rsaCng && !string.IsNullOrEmpty(_pin))
             {
+                Console.WriteLine("[DEBUG] Khoa la RSACng. Dang set SmartCardPin...");
                 byte[] pinBytes = Encoding.Unicode.GetBytes(_pin + '\0');
                 CngProperty pinProperty = new CngProperty("SmartCardPin", pinBytes, CngPropertyOptions.None);
                 rsaCng.Key.SetProperty(pinProperty);
+                Console.WriteLine("[DEBUG] Set SmartCardPin xong.");
             }
             // 2. Thiet lap PIN cho khoa dang CSP cu (Cryptographic Service Provider)
             else if (rsa is RSACryptoServiceProvider rsaCsp && !string.IsNullOrEmpty(_pin))
             {
+                Console.WriteLine("[DEBUG] Khoa la RSACryptoServiceProvider. Dang build CSP params voi PIN...");
                 var container = rsaCsp.CspKeyContainerInfo;
                 CspParameters cspParams = new CspParameters
                 {
@@ -229,11 +242,21 @@ public class CngUserSignature : IExternalSignature
                 
                 using (var rsaCspWithPin = new RSACryptoServiceProvider(cspParams))
                 {
-                    return rsaCspWithPin.SignData(message, new HashAlgorithmName(_hashAlgorithm), RSASignaturePadding.Pkcs1);
+                    Console.WriteLine("[DEBUG] Dang goi rsaCspWithPin.SignData...");
+                    byte[] sig = rsaCspWithPin.SignData(message, new HashAlgorithmName(_hashAlgorithm), RSASignaturePadding.Pkcs1);
+                    Console.WriteLine("[DEBUG] rsaCspWithPin.SignData thanh cong.");
+                    return sig;
                 }
             }
+            else
+            {
+                Console.WriteLine("[DEBUG] Khong set duoc PIN (hoac rsa khong phai CNG/CSP, hoac PIN rong).");
+            }
 
-            return rsa.SignData(message, new HashAlgorithmName(_hashAlgorithm), RSASignaturePadding.Pkcs1);
+            Console.WriteLine("[DEBUG] Dang goi rsa.SignData (mac dinh)...");
+            byte[] signature = rsa.SignData(message, new HashAlgorithmName(_hashAlgorithm), RSASignaturePadding.Pkcs1);
+            Console.WriteLine("[DEBUG] rsa.SignData (mac dinh) thanh cong.");
+            return signature;
         }
     }
 }
