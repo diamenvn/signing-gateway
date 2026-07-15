@@ -2271,9 +2271,21 @@ async function main() {
   }
   if (arg === '--install') {
     const { execSync } = require('node:child_process');
+    const fs = require('node:fs');
     try {
       const exePath = process.execPath;
-      execSync(`schtasks /create /tn "SigningGateway" /tr "\\"${exePath}\\"" /sc onlogon /rl highest /f`, { stdio: 'ignore', windowsHide: true });
+      const exeDir = path.dirname(exePath);
+      const vbsPath = path.join(exeDir, 'run-hidden.vbs');
+      
+      const vbsContent = [
+        'Set s = CreateObject("WScript.Shell")',
+        `s.CurrentDirectory = "${BASE_DIR}"`,
+        `s.Run """${exePath}""", 0, False`
+      ].join('\r\n');
+      
+      fs.writeFileSync(vbsPath, vbsContent, 'utf8');
+      
+      execSync(`schtasks /create /tn "SigningGateway" /tr "wscript.exe \\"${vbsPath}\\"" /sc onlogon /rl highest /f`, { stdio: 'ignore', windowsHide: true });
       execSync(`schtasks /run /tn "SigningGateway"`, { stdio: 'ignore', windowsHide: true });
       process.exit(0);
     } catch (e) {
@@ -2282,9 +2294,16 @@ async function main() {
   }
   if (arg === '--uninstall') {
     const { execSync } = require('node:child_process');
+    const fs = require('node:fs');
     try {
       try { execSync(`schtasks /end /tn "SigningGateway"`, { stdio: 'ignore', windowsHide: true }); } catch (_) {}
-      execSync(`schtasks /delete /tn "SigningGateway" /f`, { stdio: 'ignore', windowsHide: true });
+      try { execSync(`schtasks /delete /tn "SigningGateway" /f`, { stdio: 'ignore', windowsHide: true }); } catch (_) {}
+      
+      const exePath = process.execPath;
+      const vbsPath = path.join(path.dirname(exePath), 'run-hidden.vbs');
+      if (fs.existsSync(vbsPath)) {
+        try { fs.unlinkSync(vbsPath); } catch (_) {}
+      }
       process.exit(0);
     } catch (e) {
       process.exit(1);
