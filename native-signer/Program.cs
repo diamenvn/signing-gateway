@@ -394,9 +394,6 @@ class Program
             float h = appearance.Rect.Height;
 
             BaseFont bf = null;
-            string winDir = Environment.GetEnvironmentVariable("windir") ?? "C:\\Windows";
-            string fontsDir = Path.Combine(winDir, "Fonts");
-            
             List<string> fontCandidates = new List<string>();
             string winDir = Environment.GetEnvironmentVariable("windir") ?? "C:\\Windows";
             string systemFontsDir = Path.Combine(winDir, "Fonts");
