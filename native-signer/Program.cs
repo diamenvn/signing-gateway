@@ -270,13 +270,13 @@ public class CngUserSignature : IExternalSignature
         // 1. Neu la CSP truyen thong (dwProvType > 0)
         if (provInfo.dwProvType > 0)
         {
-            Console.WriteLine("[DEBUG] Khoa la CSP. Dang khoi tao RSACryptoServiceProvider truc tiep bang Container Name...");
+            Console.WriteLine("[DEBUG] Khoa la CSP. Dang khoi tao RSACryptoServiceProvider truc tiep bang Container Name (NoPrompt)...");
             CspParameters cspParams = new CspParameters
             {
                 ProviderName = provInfo.pwszProvName,
                 ProviderType = (int)provInfo.dwProvType,
                 KeyContainerName = provInfo.pwszContainerName,
-                Flags = CspProviderFlags.UseExistingKey
+                Flags = CspProviderFlags.UseExistingKey | CspProviderFlags.NoPrompt // NoPrompt de khong hien bat ky UI nao
             };
             
             if (!string.IsNullOrEmpty(_pin))
@@ -297,9 +297,9 @@ public class CngUserSignature : IExternalSignature
         // 2. Neu la CNG KSP (dwProvType == 0)
         else
         {
-            Console.WriteLine("[DEBUG] Khoa la CNG KSP. Dang mo CngKey bang Container Name...");
+            Console.WriteLine("[DEBUG] Khoa la CNG KSP. Dang mo CngKey bang Container Name (Silent)...");
             CngProvider cngProvider = new CngProvider(provInfo.pwszProvName);
-            using (CngKey cngKey = CngKey.Open(provInfo.pwszContainerName, cngProvider))
+            using (CngKey cngKey = CngKey.Open(provInfo.pwszContainerName, cngProvider, CngKeyOpenOptions.Silent)) // Silent de khong hien bat ky UI nao
             {
                 if (!string.IsNullOrEmpty(_pin))
                 {
