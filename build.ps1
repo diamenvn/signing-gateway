@@ -96,7 +96,7 @@ $NativeSignerProj = Join-Path $Root 'native-signer\pdf-signer.csproj'
 if (-not (Test-Path $NativeSignerProj)) {
     throw "Khong tim thay $NativeSignerProj"
 }
-& dotnet publish "$NativeSignerProj" -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:PublishReadyToRun=true -o (Join-Path $Root 'bin')
+& dotnet publish "$NativeSignerProj" -c Release -r win-x86 --self-contained true -p:PublishSingleFile=true -p:PublishReadyToRun=true -o (Join-Path $Root 'bin')
 if ($LASTEXITCODE -ne 0) { throw 'Bien dich C# native-signer that bai' }
 Write-Host '  pdf-signer.exe: OK' -ForegroundColor Green
 
