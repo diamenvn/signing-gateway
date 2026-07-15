@@ -396,7 +396,7 @@ class Program
 
     static bool CheckIfDllContainsCert(string dllPath, byte[] certRawData)
     {
-        IntPtr hModule = LoadLibrary(dllPath);
+        IntPtr hModule = Win32.LoadLibrary(dllPath);
         if (hModule == IntPtr.Zero) return false;
 
         try
@@ -439,7 +439,7 @@ class Program
                     foreach (int slotId in slots)
                     {
                         IntPtr hSession;
-                        rv = cOpenSession((uint)slotId, CKF_SERIAL_SESSION, IntPtr.Zero, IntPtr.Zero, out hSession);
+                        rv = cOpenSession((uint)slotId, Pkcs11Const.CKF_SERIAL_SESSION, IntPtr.Zero, IntPtr.Zero, out hSession);
                         if (rv != 0) continue;
 
                         try
@@ -538,7 +538,7 @@ class Program
         catch {}
         finally
         {
-            FreeLibrary(hModule);
+            Win32.FreeLibrary(hModule);
         }
         return false;
     }
@@ -555,7 +555,7 @@ class Program
 
     static T GetFuncLocal<T>(IntPtr hModule, string name) where T : Delegate
     {
-        IntPtr proc = GetProcAddress(hModule, name);
+        IntPtr proc = Win32.GetProcAddress(hModule, name);
         if (proc == IntPtr.Zero)
         {
             int size = 0;
@@ -573,9 +573,9 @@ class Program
             }
             if (size > 0)
             {
-                proc = GetProcAddress(hModule, $"_{name}@{size}");
+                proc = Win32.GetProcAddress(hModule, $"_{name}@{size}");
                 if (proc == IntPtr.Zero)
-                    proc = GetProcAddress(hModule, $"{name}@{size}");
+                    proc = Win32.GetProcAddress(hModule, $"{name}@{size}");
             }
         }
         if (proc == IntPtr.Zero) return null;
@@ -1290,7 +1290,7 @@ public class Pkcs11Signature : IExternalSignature
 
     public byte[] SignTest(byte[] hashVal, bool prependPrefix)
     {
-        IntPtr hModule = LoadLibrary(_dllPath);
+        IntPtr hModule = Win32.LoadLibrary(_dllPath);
         if (hModule == IntPtr.Zero)
             throw new Exception($"Failed to load PKCS#11 DLL: {_dllPath}");
 
@@ -1332,14 +1332,14 @@ public class Pkcs11Signature : IExternalSignature
                     uint slotId = (uint)slots[0];
 
                     IntPtr hSession;
-                    rv = cOpenSession(slotId, CKF_SERIAL_SESSION, IntPtr.Zero, IntPtr.Zero, out hSession);
+                    rv = cOpenSession(slotId, Pkcs11Const.CKF_SERIAL_SESSION, IntPtr.Zero, IntPtr.Zero, out hSession);
                     if (rv != 0)
                         throw new Exception($"C_OpenSession failed: 0x{rv:X8}");
 
                     try
                     {
                         byte[] pinBytes = Encoding.ASCII.GetBytes(_pin);
-                        rv = cLogin(hSession, CKU_USER, pinBytes, (uint)pinBytes.Length);
+                        rv = cLogin(hSession, Pkcs11Const.CKU_USER, pinBytes, (uint)pinBytes.Length);
                         if (rv != 0 && rv != 0x00000100) // CKR_USER_ALREADY_LOGGED_IN = 0x00000100
                             throw new Exception($"C_Login failed: 0x{rv:X8}");
 
@@ -1381,7 +1381,7 @@ public class Pkcs11Signature : IExternalSignature
                                             if (rvAttr == 0)
                                             {
                                                 uint classVal = (uint)Marshal.ReadInt32(pClassVal);
-                                                if (classVal == CKO_PRIVATE_KEY)
+                                                if (classVal == Pkcs11Const.CKO_PRIVATE_KEY)
                                                 {
                                                     hKey = hObj;
                                                 }
@@ -1420,7 +1420,7 @@ public class Pkcs11Signature : IExternalSignature
                             }
 
                             CK_MECHANISM mech = new CK_MECHANISM();
-                            mech.mechanism = CKM_RSA_PKCS;
+                            mech.mechanism = Pkcs11Const.CKM_RSA_PKCS;
                             mech.pParameter = IntPtr.Zero;
                             mech.ulParameterLen = 0;
 
