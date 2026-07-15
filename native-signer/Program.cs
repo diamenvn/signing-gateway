@@ -9,6 +9,8 @@ using System.Text;
 using System.Runtime.InteropServices;
 using System.Collections.Generic;
 using System.Reflection;
+using System.Xml;
+using System.Security.Cryptography.Xml;
 
 class Program
 {
@@ -25,13 +27,16 @@ class Program
         float ury = 0;
         string desc = null;
         string image = null;
+        string colorStr = null;
 
         bool listOnly = false;
         bool testPkcs11 = false;
+        bool xmlMode = false;
         for (int i = 0; i < args.Length; i++)
         {
             if (args[i] == "--list") listOnly = true;
             else if (args[i] == "--test-pkcs11") testPkcs11 = true;
+            else if (args[i] == "--xml") xmlMode = true;
             else if (args[i] == "--input" && i + 1 < args.Length) input = args[++i];
             else if (args[i] == "--output" && i + 1 < args.Length) output = args[++i];
             else if (args[i] == "--serial" && i + 1 < args.Length) serial = args[++i];
@@ -43,6 +48,7 @@ class Program
             else if (args[i] == "--ury" && i + 1 < args.Length) float.TryParse(args[++i], out ury);
             else if (args[i] == "--desc" && i + 1 < args.Length) desc = args[++i];
             else if (args[i] == "--image" && i + 1 < args.Length) image = args[++i];
+            else if (args[i] == "--color" && i + 1 < args.Length) colorStr = args[++i];
         }
 
         if (listOnly)
@@ -185,6 +191,36 @@ class Program
             return 0;
         }
 
+        if (xmlMode)
+        {
+            if (string.IsNullOrEmpty(input) || string.IsNullOrEmpty(output) || string.IsNullOrEmpty(serial))
+            {
+                Console.Error.WriteLine("Loi: Thieu tham so bat buoc (--input, --output, --serial) cho XML");
+                return 1;
+            }
+
+            try
+            {
+                Console.WriteLine($"[INFO] Dang tim chung thu voi Serial: {serial} trong Windows Store (CurrentUser/My)...");
+                X509Certificate2 cert = FindCertificate(serial);
+                if (cert == null)
+                {
+                    Console.Error.WriteLine($"CERTIFICATE_NOT_FOUND: Khong tim thay chung thu nao voi Serial: '{serial}' trong Windows Store.");
+                    return 1;
+                }
+
+                Console.WriteLine($"[INFO] Da tim thay chung thu: {cert.Subject}");
+                SignXml(input, output, cert, pin);
+                Console.WriteLine("[INFO] Ky XML thanh cong!");
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"[DEBUG_RAW_ERR] {ex.ToString()}");
+                return 1;
+            }
+        }
+
         if (string.IsNullOrEmpty(input) || string.IsNullOrEmpty(output) || string.IsNullOrEmpty(serial))
         {
             Console.Error.WriteLine("Loi: Thieu tham so bat buoc (--input, --output, --serial)");
@@ -204,7 +240,7 @@ class Program
 
             Console.WriteLine($"[INFO] Da tim thay chung thu: {cert.Subject}");
             Console.WriteLine($"[INFO] Dang tien hanh ky file PDF: {input} -> {output}...");
-            SignPdf(input, output, cert, pin, page, llx, lly, urx, ury, desc, image);
+            SignPdf(input, output, cert, pin, page, llx, lly, urx, ury, desc, image, colorStr);
             Console.WriteLine("[INFO] Ky so thanh cong!");
             return 0;
         }
@@ -262,7 +298,8 @@ class Program
         float urx, 
         float ury, 
         string description, 
-        string imagePath)
+        string imagePath,
+        string colorStr)
     {
         Console.WriteLine("[DEBUG] Bat dau SignPdf...");
         // 1. Dung chuoi chung thu (cert chain)
@@ -313,10 +350,10 @@ class Program
             {
                 text += $"\nLý do: {description}";
             }
-            appearance.Layer2Text = text;
 
             // Chen hinh anh ben trai va text ben phai neu co anh
-            if (!string.IsNullOrEmpty(imagePath) && File.Exists(imagePath))
+            bool hasImage = !string.IsNullOrEmpty(imagePath) && File.Exists(imagePath);
+            if (hasImage)
             {
                 iTextSharp.text.Image img = iTextSharp.text.Image.GetInstance(imagePath);
                 appearance.SignatureGraphic = img;
@@ -327,12 +364,170 @@ class Program
                 appearance.SignatureRenderingMode = PdfSignatureAppearance.RenderingMode.DESCRIPTION;
             }
 
+            appearance.Acro6Layers = true;
+
+            BaseColor textColor = BaseColor.BLACK;
+            if (!string.IsNullOrEmpty(colorStr))
+            {
+                try
+                {
+                    if (colorStr.Contains(","))
+                    {
+                        string[] rgb = colorStr.Split(',');
+                        if (rgb.Length == 3)
+                        {
+                            textColor = new BaseColor(int.Parse(rgb[0].Trim()), int.Parse(rgb[1].Trim()), int.Parse(rgb[2].Trim()));
+                        }
+                    }
+                    else
+                    {
+                        string hex = colorStr.TrimStart('#');
+                        if (hex.Length == 6)
+                        {
+                            textColor = new BaseColor(
+                                Convert.ToInt32(hex.Substring(0, 2), 16),
+                                Convert.ToInt32(hex.Substring(2, 2), 16),
+                                Convert.ToInt32(hex.Substring(4, 2), 16)
+                            );
+                        }
+                    }
+                }
+                catch
+                {
+                    textColor = new BaseColor(0, 70, 150);
+                }
+            }
+
+            PdfTemplate layer2 = appearance.GetLayer(2);
+            float w = appearance.Rect.Width;
+            float h = appearance.Rect.Height;
+
+            BaseFont bf = null;
+            string winDir = Environment.GetEnvironmentVariable("windir") ?? "C:\\Windows";
+            string fontsDir = Path.Combine(winDir, "Fonts");
+            
+            string[] fontCandidates = {
+                Path.Combine(fontsDir, "arial.ttf"),
+                Path.Combine(fontsDir, "times.ttf"),
+                Path.Combine(fontsDir, "tahoma.ttf"),
+                Path.Combine(fontsDir, "calibri.ttf"),
+                Path.Combine(fontsDir, "segoeui.ttf")
+            };
+
+            foreach (var path in fontCandidates)
+            {
+                if (File.Exists(path))
+                {
+                    try
+                    {
+                        bf = BaseFont.CreateFont(path, BaseFont.IDENTITY_H, BaseFont.EMBEDDED);
+                        break;
+                    }
+                    catch {}
+                }
+            }
+
+            if (bf == null)
+            {
+                try
+                {
+                    if (Directory.Exists(fontsDir))
+                    {
+                        var ttfFiles = Directory.GetFiles(fontsDir, "*.ttf");
+                        foreach (var path in ttfFiles)
+                        {
+                            try
+                            {
+                                bf = BaseFont.CreateFont(path, BaseFont.IDENTITY_H, BaseFont.EMBEDDED);
+                                break;
+                            }
+                            catch {}
+                        }
+                    }
+                }
+                catch {}
+            }
+
+            if (bf == null)
+            {
+                bf = BaseFont.CreateFont(BaseFont.HELVETICA, BaseFont.CP1252, BaseFont.NOT_EMBEDDED);
+            }
+
+            Font font = new Font(bf, 8.5f, Font.NORMAL, textColor);
+            ColumnText ct = new ColumnText(layer2);
+            
+            float textLeft = 3;
+            if (hasImage)
+            {
+                textLeft = (w / 2) + 3;
+            }
+
+            ct.SetSimpleColumn(new Phrase(text, font), textLeft, 0, w - 3, h - 2, 11, Element.ALIGN_LEFT);
+            ct.Go();
+
             // Thuc hien ky so detached CMS
             Console.WriteLine("[DEBUG] Dang goi MakeSignature.SignDetached...");
             MakeSignature.SignDetached(appearance, externalSignature, chain, null, null, null, 0, CryptoStandard.CMS);
             Console.WriteLine("[DEBUG] Da goi xong MakeSignature.SignDetached...");
         }
         Console.WriteLine("[DEBUG] Da dong va hoan tat PdfStamper.");
+    }
+
+    static void SignXml(string inputPath, string outputPath, X509Certificate2 cert, string pin)
+    {
+        Console.WriteLine("[DEBUG] Bat dau SignXml...");
+        XmlDocument xmlDoc = new XmlDocument();
+        xmlDoc.PreserveWhitespace = true;
+        xmlDoc.Load(inputPath);
+
+        string pkcs11DllPath = FindCompatiblePkcs11Dll(cert, pin);
+        RSA rsaKey = null;
+
+        if (pkcs11DllPath != null)
+        {
+            Console.WriteLine($"[INFO] Phat hien driver PKCS#11: {pkcs11DllPath}. Dung PKCS#11 de ky XML...");
+            var pkcs = new Pkcs11Signature(pkcs11DllPath, pin, "SHA256");
+            rsaKey = new Pkcs11Rsa(pkcs, cert);
+        }
+        else
+        {
+            Console.WriteLine("[INFO] Dung luong ky mac dinh CNG/CSP de ky XML...");
+            rsaKey = CngUserSignature.GetSilentRsaKey(cert, pin);
+        }
+
+        try
+        {
+            SignedXml signedXml = new SignedXml(xmlDoc);
+            signedXml.SigningKey = rsaKey;
+
+            Reference reference = new Reference();
+            reference.Uri = ""; // Sign the entire document
+            reference.DigestMethod = "http://www.w3.org/2001/04/xmlenc#sha256";
+
+            XmlDsigEnvelopedSignatureTransform env = new XmlDsigEnvelopedSignatureTransform();
+            reference.AddTransform(env);
+
+            signedXml.AddReference(reference);
+
+            KeyInfo keyInfo = new KeyInfo();
+            KeyInfoX509Data x509Data = new KeyInfoX509Data(cert);
+            keyInfo.AddClause(x509Data);
+            signedXml.KeyInfo = keyInfo;
+
+            signedXml.SignedInfo.SignatureMethod = "http://www.w3.org/2001/04/xmldsig-more#rsa-sha256";
+
+            signedXml.ComputeSignature();
+
+            XmlElement xmlDigitalSignature = signedXml.GetXml();
+            xmlDoc.DocumentElement.AppendChild(xmlDoc.ImportNode(xmlDigitalSignature, true));
+
+            xmlDoc.Save(outputPath);
+            Console.WriteLine("[DEBUG] Da ky XML va luu file thanh cong.");
+        }
+        finally
+        {
+            if (rsaKey != null) rsaKey.Dispose();
+        }
     }
 
     static string GetCertCN(X509Certificate2 cert)
@@ -836,6 +1031,87 @@ public class CngUserSignature : IExternalSignature
                     }
                 }
             }
+        }
+    }
+
+    public static RSA GetSilentRsaKey(X509Certificate2 cert, string pin)
+    {
+        var tempSigObj = new CngUserSignature(cert, pin, "SHA256");
+        CRYPT_KEY_PROV_INFO? provInfoOpt = tempSigObj.GetKeyProvInfo();
+        if (provInfoOpt == null)
+        {
+            return cert.GetRSAPrivateKey();
+        }
+
+        var provInfo = provInfoOpt.Value;
+
+        if (provInfo.dwProvType > 0)
+        {
+            try
+            {
+                CspParameters cspParamsSilent = new CspParameters
+                {
+                    ProviderName = provInfo.pwszProvName,
+                    ProviderType = (int)provInfo.dwProvType,
+                    KeyContainerName = provInfo.pwszContainerName,
+                    Flags = CspProviderFlags.UseExistingKey | CspProviderFlags.NoPrompt
+                };
+
+                if (!string.IsNullOrEmpty(pin))
+                {
+                    SecureString securePin = new SecureString();
+                    foreach (char c in pin) securePin.AppendChar(c);
+                    cspParamsSilent.KeyPassword = securePin;
+                }
+
+                var rsaCsp = new RSACryptoServiceProvider(cspParamsSilent);
+                if (!string.IsNullOrEmpty(pin))
+                {
+                    tempSigObj.SetCspPin(rsaCsp, pin, false);
+                }
+                return rsaCsp;
+            }
+            catch
+            {
+                CspParameters cspParamsInteractive = new CspParameters
+                {
+                    ProviderName = provInfo.pwszProvName,
+                    ProviderType = (int)provInfo.dwProvType,
+                    KeyContainerName = provInfo.pwszContainerName,
+                    Flags = CspProviderFlags.UseExistingKey
+                };
+
+                if (!string.IsNullOrEmpty(pin))
+                {
+                    SecureString securePin = new SecureString();
+                    foreach (char c in pin) securePin.AppendChar(c);
+                    cspParamsInteractive.KeyPassword = securePin;
+                }
+
+                var rsaCsp = new RSACryptoServiceProvider(cspParamsInteractive);
+                if (!string.IsNullOrEmpty(pin))
+                {
+                    tempSigObj.SetCspPin(rsaCsp, pin, false);
+                }
+                return rsaCsp;
+            }
+        }
+        else
+        {
+            CngProvider cngProvider = new CngProvider(provInfo.pwszProvName);
+            CngKey cngKey = CngKey.Open(provInfo.pwszContainerName, cngProvider, CngKeyOpenOptions.Silent);
+            if (!string.IsNullOrEmpty(pin))
+            {
+                try
+                {
+                    tempSigObj.SetCngPin(cngKey, pin, true);
+                }
+                catch
+                {
+                    tempSigObj.SetCngPin(cngKey, pin, false);
+                }
+            }
+            return new RSACng(cngKey);
         }
     }
 }
@@ -1371,3 +1647,54 @@ public delegate uint C_SignInit(IntPtr hSession, ref CK_MECHANISM pMechanism, In
 
 [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
 public delegate uint C_Sign(IntPtr hSession, byte[] pData, uint ulDataLen, byte[] pSignature, ref uint pulSignatureLen);
+
+public class Pkcs11Rsa : RSA
+{
+    private readonly Pkcs11Signature _pkcs11;
+    private readonly RSA _publicKey;
+
+    public Pkcs11Rsa(Pkcs11Signature pkcs11, X509Certificate2 cert)
+    {
+        _pkcs11 = pkcs11;
+        _publicKey = cert.GetRSAPublicKey();
+    }
+
+    public override int KeySize => _publicKey.KeySize;
+
+    public override byte[] SignHash(byte[] hash, HashAlgorithmName hashAlgorithm, RSASignaturePadding padding)
+    {
+        if (padding != RSASignaturePadding.Pkcs1)
+            throw new NotSupportedException("Only PKCS#1 padding is supported.");
+        
+        if (hashAlgorithm != HashAlgorithmName.SHA256)
+            throw new NotSupportedException("Only SHA-256 is supported.");
+
+        return _pkcs11.SignTest(hash, true);
+    }
+
+    public override bool VerifyHash(byte[] hash, byte[] signature, HashAlgorithmName hashAlgorithm, RSASignaturePadding padding)
+    {
+        return _publicKey.VerifyHash(hash, signature, hashAlgorithm, padding);
+    }
+
+    public override RSAParameters ExportParameters(bool includePrivateParameters)
+    {
+        if (includePrivateParameters)
+            throw new NotSupportedException("Exporting private parameters is not supported.");
+        return _publicKey.ExportParameters(false);
+    }
+
+    public override void ImportParameters(RSAParameters parameters)
+    {
+        throw new NotSupportedException();
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            _publicKey.Dispose();
+        }
+        base.Dispose(disposing);
+    }
+}
