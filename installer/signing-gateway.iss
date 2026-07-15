@@ -89,7 +89,6 @@ var
   TunPage: TInputOptionWizardPage;
   TokPage: TInputQueryWizardPage;
   TgPage: TInputQueryWizardPage;
-  OptPage: TInputOptionWizardPage;
   BundledLicense: String;
   HasPluginSetup: Boolean;
   SavedTenantId, SavedSecret, SavedOrigin, SavedLicense: String;
@@ -346,16 +345,6 @@ begin
   TgPage.Add('Chat ID:', False);
   TgPage.Values[0] := SavedTgToken;
   TgPage.Values[1] := SavedTgChatId;
-
-  // Trang tuy chon hien thi
-  OptPage := CreateInputOptionPage(TgPage.ID,
-    'Tuy chon hien thi',
-    'Cua so dong lenh (CMD)',
-    'Khi gateway chay:',
-    False, False);
-  OptPage.Add('Hien cua so CMD (xem log truc tiep)');
-  OptPage.Add('An cua so CMD (chay ngam - dung khi da co Telegram)');
-  OptPage.Values[0] := True;
 end;
 
 function ShouldSkipPage(PageID: Integer): Boolean;
@@ -503,52 +492,11 @@ begin
     MsgBox('Khong ghi duoc config.json vao:' + #13#10 + CfgFile, mbError, MB_OK);
 end;
 
-// Chay khi DANG NHAP, KHONG phai Windows Service.
-// Ly do: VNPT Plugin bat hop thoai nhap PIN. Service chay o session 0 khong co
-// desktop -> hop thoai hien o noi khong ai bam duoc -> moi request ky treo.
-procedure CreateStartupShortcut();
-var
-  Vbs: TArrayOfString;
-  VbsPath: String;
-begin
-  if OptPage.Values[1] then
-  begin
-    // AN CMD: exe la console app, SW_HIDE khong an triet de duoc.
-    // Tao 1 file VBS chay exe hoan toan an (WindowStyle = 0).
-    VbsPath := ExpandConstant('{app}\run-hidden.vbs');
-    SetArrayLength(Vbs, 3);
-    Vbs[0] := 'Set s = CreateObject("WScript.Shell")';
-    Vbs[1] := 's.CurrentDirectory = "' + ExpandConstant('{commonappdata}\SigningGateway') + '"';
-    Vbs[2] := 's.Run """' + ExpandConstant('{app}\signing-gateway.exe') + '""", 0, False';
-    SaveStringsToFile(VbsPath, Vbs, False);
-
-    CreateShellLink(
-      ExpandConstant('{commonstartup}\Signer Gateway.lnk'),
-      'Signer Gateway (an)',
-      'wscript.exe',
-      '"' + VbsPath + '"',
-      ExpandConstant('{commonappdata}\SigningGateway'),
-      '', 0, SW_HIDE);
-  end
-  else
-  begin
-    // HIEN CMD: chay truc tiep, cua so thu nho
-    CreateShellLink(
-      ExpandConstant('{commonstartup}\Signer Gateway.lnk'),
-      'Signer Gateway',
-      ExpandConstant('{app}\signing-gateway.exe'),
-      '',
-      ExpandConstant('{commonappdata}\SigningGateway'),
-      '', 0, SW_SHOWMINNOACTIVE);
-  end;
-end;
-
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
   if CurStep = ssPostInstall then
   begin
     WriteConfig();
-    CreateStartupShortcut();
   end;
 end;
 
@@ -586,11 +534,6 @@ begin
   else
     S := S + Space + 'Telegram: tat' + NewLine;
 
-  if OptPage.Values[1] then
-    S := S + Space + 'Cua so CMD: AN (chay ngam)' + NewLine
-  else
-    S := S + Space + 'Cua so CMD: hien' + NewLine;
-
   if HasPluginSetup then
     S := S + Space + 'VNPT-CA Plugin: se duoc CAI TU DONG' + NewLine
   else if CheckVnptPlugin() then
@@ -599,8 +542,7 @@ begin
     S := S + Space + 'VNPT-CA Plugin: CHUA CO - phai tu cai truoc khi ky duoc' + NewLine;
 
   S := S + NewLine + 'Sau khi cai:' + NewLine;
-  S := S + Space + 'Gateway tu chay moi khi dang nhap Windows.' + NewLine;
-  S := S + Space + 'Lan ky dau tien sau moi lan khoi dong may se hien hop thoai PIN.' + NewLine;
-  S := S + Space + 'Phai co nguoi nhap PIN ngay tren may chu nay.' + NewLine;
+  S := S + Space + 'Gateway duoc dang ky thanh cong duoi dang elevated startup task.' + NewLine;
+  S := S + Space + 'Tu dong chay an hoan toan moi khi nguoi dung dang nhap vao Windows.' + NewLine;
   Result := S;
 end;

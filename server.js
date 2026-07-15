@@ -2273,26 +2273,20 @@ async function main() {
     const { execSync } = require('node:child_process');
     try {
       const exePath = process.execPath;
-      console.log(`Installing task SigningGateway for: ${exePath}`);
-      execSync(`schtasks /create /tn "SigningGateway" /tr "\\"${exePath}\\"" /sc onlogon /rl highest /f`, { stdio: 'inherit' });
-      execSync(`schtasks /run /tn "SigningGateway"`, { stdio: 'inherit' });
-      console.log('Installed and started SigningGateway service task successfully.');
+      execSync(`schtasks /create /tn "SigningGateway" /tr "\\"${exePath}\\"" /sc onlogon /rl highest /f`, { stdio: 'ignore', windowsHide: true });
+      execSync(`schtasks /run /tn "SigningGateway"`, { stdio: 'ignore', windowsHide: true });
       process.exit(0);
     } catch (e) {
-      console.error(`Failed to install service task: ${e.message}`);
       process.exit(1);
     }
   }
   if (arg === '--uninstall') {
     const { execSync } = require('node:child_process');
     try {
-      console.log('Uninstalling task SigningGateway...');
-      try { execSync(`schtasks /end /tn "SigningGateway"`, { stdio: 'ignore' }); } catch (_) {}
-      execSync(`schtasks /delete /tn "SigningGateway" /f`, { stdio: 'inherit' });
-      console.log('Uninstalled SigningGateway service task successfully.');
+      try { execSync(`schtasks /end /tn "SigningGateway"`, { stdio: 'ignore', windowsHide: true }); } catch (_) {}
+      execSync(`schtasks /delete /tn "SigningGateway" /f`, { stdio: 'ignore', windowsHide: true });
       process.exit(0);
     } catch (e) {
-      console.error(`Failed to uninstall service task: ${e.message}`);
       process.exit(1);
     }
   }

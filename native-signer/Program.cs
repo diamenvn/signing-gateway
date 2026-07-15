@@ -321,100 +321,25 @@ public class CngUserSignature : IExternalSignature
         Console.WriteLine("[DEBUG] Bat dau phuong thuc Sign...");
         Console.WriteLine($"[DEBUG] Sign: pin length = {(_pin != null ? _pin.Length : 0)}");
 
-        // 1. Phuong an A: Dung GetRSAPrivateKey cua X509Certificate2 (Tuong thich cao, tu dong map he thong)
-        try
-        {
-            Console.WriteLine("[DEBUG] Thu lay khoa tu GetRSAPrivateKey...");
-            using (RSA rsa = _cert.GetRSAPrivateKey())
-            {
-                if (rsa != null)
-                {
-                    Console.WriteLine($"[DEBUG] GetRSAPrivateKey kieu: {rsa.GetType().FullName}");
-                    
-                    if (rsa is RSACng rsaCng)
-                    {
-                        string providerName = rsaCng.Key.Provider.Provider;
-                        string keyName = rsaCng.Key.KeyName;
-                        Console.WriteLine($"[DEBUG] Da tu dong do tim KSP Provider: {providerName}, KeyName: {keyName}");
-
-                        // Dong handle hien tai de mo lai voi quyen Silent tranh driver bat popup bat ngo
-                        rsa.Dispose();
-
-                        Console.WriteLine("[DEBUG] Dang mo lai khoa bang CNG KSP voi tuy chon Silent...");
-                        CngProvider cngProvider = new CngProvider(providerName);
-                        using (CngKey cngKey = CngKey.Open(keyName, cngProvider, CngKeyOpenOptions.Silent))
-                        {
-                            if (!string.IsNullOrEmpty(_pin))
-                            {
-                                Console.WriteLine("[DEBUG] Dang set PIN cho CngKey...");
-                                byte[] pinBytes = Encoding.Unicode.GetBytes(_pin + '\0');
-                                CngProperty pinProperty = new CngProperty("SmartCardPin", pinBytes, CngPropertyOptions.None);
-                                cngKey.SetProperty(pinProperty);
-                            }
-
-                            using (var rsaCngSilent = new RSACng(cngKey))
-                            {
-                                Console.WriteLine("[DEBUG] Dang ky bang RSACng Silent...");
-                                byte[] signatureSilent = rsaCngSilent.SignData(message, new HashAlgorithmName(_hashAlgorithm), RSASignaturePadding.Pkcs1);
-                                Console.WriteLine("[DEBUG] Ky bang RSACng Silent thanh cong.");
-                                return signatureSilent;
-                            }
-                        }
-                    }
-                    else if (rsa is RSACryptoServiceProvider rsaCsp)
-                    {
-                        if (!string.IsNullOrEmpty(_pin))
-                        {
-                            Console.WriteLine("[DEBUG] Set PIN cho khoa RSACryptoServiceProvider qua CryptSetProvParam...");
-                            try
-                            {
-                                var field = typeof(RSACryptoServiceProvider).GetField("_safeProvHandle", BindingFlags.NonPublic | BindingFlags.Instance);
-                                if (field != null)
-                                {
-                                    var safeHandle = field.GetValue(rsaCsp) as SafeHandle;
-                                    if (safeHandle != null)
-                                    {
-                                        IntPtr hProv = safeHandle.DangerousGetHandle();
-                                        byte[] pinBytes = Encoding.ASCII.GetBytes(_pin + '\0');
-                                        bool retSig = CryptSetProvParam(hProv, PP_SIGNATURE_PIN, pinBytes, 0);
-                                        bool retKey = CryptSetProvParam(hProv, PP_KEYEXCHANGE_PIN, pinBytes, 0);
-                                        Console.WriteLine($"[DEBUG] CryptSetProvParam PP_SIGNATURE_PIN: {retSig}, PP_KEYEXCHANGE_PIN: {retKey}");
-                                    }
-                                }
-                            }
-                            catch (Exception ex)
-                            {
-                                Console.WriteLine($"[DEBUG] Loi thiet lap PIN qua CryptSetProvParam: {ex.Message}");
-                            }
-                        }
-                    }
-
-                    Console.WriteLine("[DEBUG] Dang ky bang GetRSAPrivateKey...");
-                    byte[] sig = rsa.SignData(message, new HashAlgorithmName(_hashAlgorithm), RSASignaturePadding.Pkcs1);
-                    Console.WriteLine("[DEBUG] Ky bang GetRSAPrivateKey thanh cong.");
-                    return sig;
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine("[DEBUG] (Bo qua) Thu GetRSAPrivateKey that bai: " + ex.Message);
-        }
-
-        // 2. Phuong an B (Fallback): Tao CSP/CNG thong qua Metadata cu neu GetRSAPrivateKey that bai
         CRYPT_KEY_PROV_INFO? provInfoOpt = GetKeyProvInfo();
         if (provInfoOpt == null)
         {
-            throw new Exception("Khong the lay thong tin khoa rieng tu chung thu.");
+            Console.WriteLine("[DEBUG] Khong doc duoc CRYPT_KEY_PROV_INFO. Fallback sang GetRSAPrivateKey...");
+            using (RSA rsa = _cert.GetRSAPrivateKey())
+            {
+                if (rsa == null)
+                    throw new Exception("Chung thu khong chua khoa bi mat RSA hop le.");
+                return rsa.SignData(message, new HashAlgorithmName(_hashAlgorithm), RSASignaturePadding.Pkcs1);
+            }
         }
 
         var provInfo = provInfoOpt.Value;
-        Console.WriteLine($"[DEBUG] Fallback KeyProvInfo: Container={provInfo.pwszContainerName}, Provider={provInfo.pwszProvName}, Type={provInfo.dwProvType}");
+        Console.WriteLine($"[DEBUG] KeyProvInfo: Container={provInfo.pwszContainerName}, Provider={provInfo.pwszProvName}, Type={provInfo.dwProvType}");
 
-        // CSP Fallback
+        // 1. NEU LA CSP TRUYEN THONG (dwProvType > 0) -> Bat buoc dung luong CSP de tuong thich driver tot nhat
         if (provInfo.dwProvType > 0)
         {
-            Console.WriteLine("[DEBUG] Khoi tao RSACryptoServiceProvider bang Container Name (NoPrompt)...");
+            Console.WriteLine("[DEBUG] Uu tien luong CSP cho khoa Type > 0...");
             CspParameters cspParams = new CspParameters
             {
                 ProviderName = provInfo.pwszProvName,
@@ -427,7 +352,7 @@ public class CngUserSignature : IExternalSignature
             {
                 if (!string.IsNullOrEmpty(_pin))
                 {
-                    Console.WriteLine("[DEBUG] Set PIN cho CSP qua CryptSetProvParam...");
+                    Console.WriteLine("[DEBUG] Thiet lap PIN qua CryptSetProvParam...");
                     try
                     {
                         var field = typeof(RSACryptoServiceProvider).GetField("_safeProvHandle", BindingFlags.NonPublic | BindingFlags.Instance);
@@ -438,29 +363,34 @@ public class CngUserSignature : IExternalSignature
                             {
                                 IntPtr hProv = safeHandle.DangerousGetHandle();
                                 byte[] pinBytes = Encoding.ASCII.GetBytes(_pin + '\0');
-                                CryptSetProvParam(hProv, PP_SIGNATURE_PIN, pinBytes, 0);
-                                CryptSetProvParam(hProv, PP_KEYEXCHANGE_PIN, pinBytes, 0);
+                                bool retSig = CryptSetProvParam(hProv, PP_SIGNATURE_PIN, pinBytes, 0);
+                                bool retKey = CryptSetProvParam(hProv, PP_KEYEXCHANGE_PIN, pinBytes, 0);
+                                Console.WriteLine($"[DEBUG] CryptSetProvParam PP_SIGNATURE_PIN: {retSig}, PP_KEYEXCHANGE_PIN: {retKey}");
                             }
                         }
                     }
-                    catch {}
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"[DEBUG] Loi thiet lap PIN: {ex.Message}");
+                    }
                 }
 
-                Console.WriteLine("[DEBUG] Dang ky bang fallback RSACryptoServiceProvider...");
+                Console.WriteLine("[DEBUG] Dang ky bang RSACryptoServiceProvider...");
                 byte[] sig = rsaCsp.SignData(message, new HashAlgorithmName(_hashAlgorithm), RSASignaturePadding.Pkcs1);
-                Console.WriteLine("[DEBUG] Ky thanh cong.");
+                Console.WriteLine("[DEBUG] Ky bang RSACryptoServiceProvider thanh cong.");
                 return sig;
             }
         }
-        // CNG Fallback
+        // 2. NEU LA CNG KSP (dwProvType == 0) -> Dung luong CNG
         else
         {
-            Console.WriteLine("[DEBUG] Khoi tao CNG CngKey (Silent)...");
+            Console.WriteLine("[DEBUG] Uu tien luong CNG cho khoa Type == 0...");
             CngProvider cngProvider = new CngProvider(provInfo.pwszProvName);
             using (CngKey cngKey = CngKey.Open(provInfo.pwszContainerName, cngProvider, CngKeyOpenOptions.Silent))
             {
                 if (!string.IsNullOrEmpty(_pin))
                 {
+                    Console.WriteLine("[DEBUG] Dang set PIN cho CngKey...");
                     byte[] pinBytes = Encoding.Unicode.GetBytes(_pin + '\0');
                     CngProperty pinProperty = new CngProperty("SmartCardPin", pinBytes, CngPropertyOptions.None);
                     cngKey.SetProperty(pinProperty);
@@ -468,9 +398,9 @@ public class CngUserSignature : IExternalSignature
 
                 using (var rsaCng = new RSACng(cngKey))
                 {
-                    Console.WriteLine("[DEBUG] Dang ky bang fallback RSACng...");
+                    Console.WriteLine("[DEBUG] Dang ky bang RSACng...");
                     byte[] sig = rsaCng.SignData(message, new HashAlgorithmName(_hashAlgorithm), RSASignaturePadding.Pkcs1);
-                    Console.WriteLine("[DEBUG] Ky thanh cong.");
+                    Console.WriteLine("[DEBUG] Ky bang RSACng thanh cong.");
                     return sig;
                 }
             }
