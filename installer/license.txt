@@ -1,0 +1,7 @@
+# Dan chuoi license VNPT-CA Plugin vao day (MOT DONG, khong xuong dong).
+# Dong nay va cac dong bat dau bang # se bi bo qua.
+#
+# Lay license: xem trong frontend HIS4 cho goi setLicenseKey (functionID 6),
+# hoac xin VNPT cap cho domain cua ban.
+#
+# Neu de trong, bo cai se hoi license trong wizard khi cai dat.

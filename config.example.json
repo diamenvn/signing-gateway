@@ -1,0 +1,28 @@
+{
+  "host": "127.0.0.1",
+  "port": 8080,
+
+  "allowedOrigins": ["https://his4-dev.vnpthis.vn"],
+
+  "hisSharedSecret": "",
+  "tenantId": "bv-xyz",
+
+  "licenseKey": "",
+  "pluginDomain": "his4-dev.vnpthis.vn",
+  "pluginPorts": [4433, 4434, 4435, 9201, 9202],
+
+  "certificateSerial": "",
+  "tsaUrl": "",
+  "tsaUsername": "",
+  "tsaPassword": "",
+
+  "signTimeoutMs": 120000,
+  "jobTtlMinutes": 30,
+  "maxPdfBytes": 20971520,
+
+  "tunnel": {
+    "enabled": true,
+    "token": "",
+    "exePath": ""
+  }
+}
