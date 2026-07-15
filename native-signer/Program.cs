@@ -192,8 +192,26 @@ class Program
             chain[i] = new Org.BouncyCastle.X509.X509CertificateParser().ReadCertificate(c.RawData);
         }
 
-        // 2. Khoi tao doi tuong ky ngoai (IExternalSignature) ho tro CNG va CSP
-        var externalSignature = new CngUserSignature(cert, pin, "SHA256");
+        // 2. Khoi tao doi tuong ky ngoai (IExternalSignature) ho tro PKCS#11, CNG va CSP
+        IExternalSignature externalSignature;
+        string pkcs11DllPath = null;
+        var signatureObj = new CngUserSignature(cert, pin, "SHA256");
+        var provInfo = signatureObj.GetKeyProvInfo();
+        if (provInfo != null && !string.IsNullOrEmpty(provInfo.Value.pwszProvName))
+        {
+            pkcs11DllPath = FindPkcs11Dll(provInfo.Value.pwszProvName);
+        }
+
+        if (pkcs11DllPath != null)
+        {
+            Console.WriteLine($"[INFO] Phat hien driver PKCS#11 tuong thich: {pkcs11DllPath}. Chuyen sang luong ky PKCS#11 de ky an 100%...");
+            externalSignature = new Pkcs11Signature(pkcs11DllPath, pin, "SHA256");
+        }
+        else
+        {
+            Console.WriteLine("[INFO] Su dung luong ky mac dinh CAPI/CNG...");
+            externalSignature = signatureObj;
+        }
 
         // 3. Mo va tao chu ky PDF
         using (PdfReader reader = new PdfReader(inputPath))
@@ -248,6 +266,33 @@ class Program
             }
         }
         return cert.FriendlyName ?? subject;
+    }
+
+    static string FindPkcs11Dll(string providerName)
+    {
+        string pattern = null;
+        if (providerName.Contains("ICA")) pattern = "ica_csp11_v1";
+        else if (providerName.Contains("NC-CA")) pattern = "ncca_csp11_v1";
+        else return null;
+
+        string[] searchDirs = { 
+            Environment.GetFolderPath(Environment.SpecialFolder.System),
+            Environment.GetFolderPath(Environment.SpecialFolder.SystemX86)
+        };
+
+        foreach (var dir in searchDirs)
+        {
+            if (Directory.Exists(dir))
+            {
+                // Uu tien ban silent (_s.dll)
+                string silentPath = Path.Combine(dir, pattern + "_s.dll");
+                if (File.Exists(silentPath)) return silentPath;
+
+                string normalPath = Path.Combine(dir, pattern + ".dll");
+                if (File.Exists(normalPath)) return normalPath;
+            }
+        }
+        return null;
     }
 }
 
@@ -597,6 +642,272 @@ public class CngUserSignature : IExternalSignature
                     }
                 }
             }
+        }
+    }
+}
+
+public class Pkcs11Signature : IExternalSignature
+{
+    private string _dllPath;
+    private string _pin;
+    private string _hashAlgorithm;
+
+    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Ansi)]
+    private static extern IntPtr LoadLibrary(string lpFileName);
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Ansi, ExactSpelling = true, SetLastError = true)]
+    private static extern IntPtr GetProcAddress(IntPtr hModule, string procName);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool FreeLibrary(IntPtr hModule);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate uint C_Initialize(IntPtr pReserved);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate uint C_Finalize(IntPtr pReserved);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate uint C_GetSlotList(byte tokenPresent, IntPtr pSlotList, ref uint pulCount);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate uint C_OpenSession(uint slotID, uint flags, IntPtr pApplication, IntPtr Notify, out IntPtr phSession);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate uint C_CloseSession(IntPtr hSession);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate uint C_Login(IntPtr hSession, uint userType, byte[] pPin, uint ulPinLen);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate uint C_Logout(IntPtr hSession);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate uint C_FindObjectsInit(IntPtr hSession, CK_ATTRIBUTE[] pTemplate, uint ulCount);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate uint C_FindObjects(IntPtr hSession, IntPtr phObject, uint ulMaxObjectCount, out uint pulObjectCount);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate uint C_FindObjectsFinal(IntPtr hSession);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate uint C_SignInit(IntPtr hSession, ref CK_MECHANISM pMechanism, IntPtr hKey);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate uint C_Sign(IntPtr hSession, byte[] pData, uint ulDataLen, byte[] pSignature, ref uint pulSignatureLen);
+
+    [StructLayout(LayoutKind.Sequential)]
+    struct CK_ATTRIBUTE
+    {
+        public uint type;
+        public IntPtr pValue;
+        public uint ulValueLen;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    struct CK_MECHANISM
+    {
+        public uint mechanism;
+        public IntPtr pParameter;
+        public uint ulParameterLen;
+    }
+
+    private const uint CKA_CLASS = 0x00000000;
+    private const uint CKO_PRIVATE_KEY = 0x00000003;
+    private const uint CKM_RSA_PKCS = 0x00000001;
+    private const uint CKU_USER = 1;
+    private const uint CKF_SERIAL_SESSION = 0x00000004;
+
+    public Pkcs11Signature(string dllPath, string pin, string hashAlgorithm)
+    {
+        _dllPath = dllPath;
+        _pin = pin;
+        _hashAlgorithm = hashAlgorithm.ToUpper().Replace("-", "");
+    }
+
+    public string GetHashAlgorithm()
+    {
+        return _hashAlgorithm;
+    }
+
+    public string GetEncryptionAlgorithm()
+    {
+        return "RSA";
+    }
+
+    private T GetFunc<T>(IntPtr hModule, string name) where T : Delegate
+    {
+        IntPtr proc = GetProcAddress(hModule, name);
+        if (proc == IntPtr.Zero)
+            throw new Exception($"Failed to find PKCS#11 function {name} in {_dllPath}");
+        return Marshal.GetDelegateForFunctionPointer<T>(proc);
+    }
+
+    public byte[] Sign(byte[] message)
+    {
+        Console.WriteLine($"[DEBUG] Pkcs11: Loading library {_dllPath}...");
+        IntPtr hModule = LoadLibrary(_dllPath);
+        if (hModule == IntPtr.Zero)
+        {
+            int err = Marshal.GetLastWin32Error();
+            throw new Exception($"Failed to load PKCS#11 DLL: {_dllPath} (Error: {err})");
+        }
+
+        try
+        {
+            var cInitialize = GetFunc<C_Initialize>(hModule, "C_Initialize");
+            var cFinalize = GetFunc<C_Finalize>(hModule, "C_Finalize");
+            var cGetSlotList = GetFunc<C_GetSlotList>(hModule, "C_GetSlotList");
+            var cOpenSession = GetFunc<C_OpenSession>(hModule, "C_OpenSession");
+            var cCloseSession = GetFunc<C_CloseSession>(hModule, "C_CloseSession");
+            var cLogin = GetFunc<C_Login>(hModule, "C_Login");
+            var cLogout = GetFunc<C_Logout>(hModule, "C_Logout");
+            var cFindObjectsInit = GetFunc<C_FindObjectsInit>(hModule, "C_FindObjectsInit");
+            var cFindObjects = GetFunc<C_FindObjects>(hModule, "C_FindObjects");
+            var cFindObjectsFinal = GetFunc<C_FindObjectsFinal>(hModule, "C_FindObjectsFinal");
+            var cSignInit = GetFunc<C_SignInit>(hModule, "C_SignInit");
+            var cSign = GetFunc<C_Sign>(hModule, "C_Sign");
+
+            Console.WriteLine("[DEBUG] Pkcs11: Calling C_Initialize...");
+            uint rv = cInitialize(IntPtr.Zero);
+            if (rv != 0 && rv != 0x00000191) // CKR_CRYPTOKI_ALREADY_INITIALIZED = 0x00000191
+                throw new Exception($"C_Initialize failed: 0x{rv:X8}");
+
+            try
+            {
+                Console.WriteLine("[DEBUG] Pkcs11: Getting slot list...");
+                uint count = 0;
+                rv = cGetSlotList(1, IntPtr.Zero, ref count);
+                if (rv != 0 || count == 0)
+                    throw new Exception("No active smart card slots found.");
+
+                IntPtr pSlots = Marshal.AllocHGlobal((int)count * 4);
+                try
+                {
+                    rv = cGetSlotList(1, pSlots, ref count);
+                    if (rv != 0)
+                        throw new Exception("C_GetSlotList failed.");
+
+                    int[] slots = new int[count];
+                    Marshal.Copy(pSlots, slots, 0, (int)count);
+                    uint slotId = (uint)slots[0];
+                    Console.WriteLine($"[DEBUG] Pkcs11: Using slotId={slotId}");
+
+                    Console.WriteLine("[DEBUG] Pkcs11: Opening session...");
+                    IntPtr hSession;
+                    rv = cOpenSession(slotId, CKF_SERIAL_SESSION, IntPtr.Zero, IntPtr.Zero, out hSession);
+                    if (rv != 0)
+                        throw new Exception($"C_OpenSession failed: 0x{rv:X8}");
+
+                    try
+                    {
+                        Console.WriteLine("[DEBUG] Pkcs11: Logging in...");
+                        byte[] pinBytes = Encoding.ASCII.GetBytes(_pin);
+                        rv = cLogin(hSession, CKU_USER, pinBytes, (uint)pinBytes.Length);
+                        if (rv != 0)
+                            throw new Exception($"C_Login failed (wrong PIN?): 0x{rv:X8}");
+
+                        try
+                        {
+                            Console.WriteLine("[DEBUG] Pkcs11: Finding private key...");
+                            IntPtr pClass = Marshal.AllocHGlobal(4);
+                            Marshal.WriteInt32(pClass, (int)CKO_PRIVATE_KEY);
+                            try
+                            {
+                                CK_ATTRIBUTE[] template = new CK_ATTRIBUTE[1];
+                                template[0].type = CKA_CLASS;
+                                template[0].pValue = pClass;
+                                template[0].ulValueLen = 4;
+
+                                rv = cFindObjectsInit(hSession, template, 1);
+                                if (rv != 0)
+                                    throw new Exception("C_FindObjectsInit failed.");
+
+                                try
+                                {
+                                    IntPtr phObject = Marshal.AllocHGlobal(4);
+                                    try
+                                    {
+                                        uint objCount;
+                                        rv = cFindObjects(hSession, phObject, 1, out objCount);
+                                        if (rv != 0 || objCount == 0)
+                                            throw new Exception("No private key object found on the token.");
+
+                                        IntPtr hKey = (IntPtr)Marshal.ReadInt32(phObject);
+
+                                        Console.WriteLine("[DEBUG] Pkcs11: Formatting digest...");
+                                        // Formatted DigestInfo for SHA-256
+                                        byte[] prefix = { 0x30, 0x31, 0x30, 0x0d, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x01, 0x05, 0x00, 0x04, 0x20 };
+                                        byte[] digestInfo = new byte[prefix.Length + message.Length];
+                                        Buffer.BlockCopy(prefix, 0, digestInfo, 0, prefix.Length);
+                                        Buffer.BlockCopy(message, 0, digestInfo, prefix.Length, message.Length);
+
+                                        Console.WriteLine("[DEBUG] Pkcs11: Initializing sign mechanism...");
+                                        CK_MECHANISM mech = new CK_MECHANISM();
+                                        mech.mechanism = CKM_RSA_PKCS;
+                                        mech.pParameter = IntPtr.Zero;
+                                        mech.ulParameterLen = 0;
+
+                                        rv = cSignInit(hSession, ref mech, hKey);
+                                        if (rv != 0)
+                                            throw new Exception($"C_SignInit failed: 0x{rv:X8}");
+
+                                        Console.WriteLine("[DEBUG] Pkcs11: Calling C_Sign (query length)...");
+                                        uint sigLen = 0;
+                                        rv = cSign(hSession, digestInfo, (uint)digestInfo.Length, null, ref sigLen);
+                                        if (rv != 0 || sigLen == 0)
+                                            throw new Exception($"C_Sign failed to query length: 0x{rv:X8}");
+
+                                        Console.WriteLine($"[DEBUG] Pkcs11: Calling C_Sign (executing signature, length={sigLen})...");
+                                        byte[] signature = new byte[sigLen];
+                                        rv = cSign(hSession, digestInfo, (uint)digestInfo.Length, signature, ref sigLen);
+                                        if (rv != 0)
+                                            throw new Exception($"C_Sign signature failed: 0x{rv:X8}");
+
+                                        Console.WriteLine("[DEBUG] Pkcs11: Signature succeeded!");
+                                        return signature;
+                                    }
+                                    finally
+                                    {
+                                        Marshal.FreeHGlobal(phObject);
+                                    }
+                                }
+                                finally
+                                {
+                                    cFindObjectsFinal(hSession);
+                                }
+                            }
+                            finally
+                            {
+                                Marshal.FreeHGlobal(pClass);
+                            }
+                        }
+                        finally
+                        {
+                            Console.WriteLine("[DEBUG] Pkcs11: Logging out...");
+                            cLogout(hSession);
+                        }
+                    }
+                    finally
+                    {
+                        Console.WriteLine("[DEBUG] Pkcs11: Closing session...");
+                        cCloseSession(hSession);
+                    }
+                }
+                finally
+                {
+                    Marshal.FreeHGlobal(pSlots);
+                }
+            }
+            finally
+            {
+                cFinalize(IntPtr.Zero);
+            }
+        }
+        finally
+        {
+            FreeLibrary(hModule);
         }
     }
 }
