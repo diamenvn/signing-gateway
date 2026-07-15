@@ -29,7 +29,8 @@ function makeToken() {
 
 (async () => {
   // health
-  const h = await (await fetch(`${BASE}/v2/health`)).json();
+  const resHealth = await (await fetch(`${BASE}/v2/health`)).json();
+  const h = resHealth.data;
   console.log('health:', h);
   if (h.token !== 'present') { console.log('CHUA CAM USB TOKEN.'); process.exit(1); }
 
@@ -48,13 +49,13 @@ function makeToken() {
       }),
     });
     const ms = Date.now() - t0;
-    const data = await r.json();
+    const resSign = await r.json();
     if (r.ok) {
       const out = `signed-${i}.pdf`;
-      fs.writeFileSync(out, Buffer.from(data.document, 'base64'));
+      fs.writeFileSync(out, Buffer.from(resSign.data.document, 'base64'));
       console.log(`Lan ${i}: ${ms}ms -> ${out}  ${i > 1 && ms < 4000 ? '(nhanh - con PIN cache)' : ''}`);
     } else {
-      console.log(`Lan ${i}: LOI ${r.status} - ${data.error}`);
+      console.log(`Lan ${i}: LOI ${r.status} - ${resSign.error_code}`);
     }
   }
 })();

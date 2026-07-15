@@ -9,6 +9,8 @@ using System.Text;
 using System.Runtime.InteropServices;
 using System.Collections.Generic;
 using System.Reflection;
+using System.Xml;
+using System.Security.Cryptography.Xml;
 
 class Program
 {
@@ -28,10 +30,12 @@ class Program
 
         bool listOnly = false;
         bool testPkcs11 = false;
+        bool xmlMode = false;
         for (int i = 0; i < args.Length; i++)
         {
             if (args[i] == "--list") listOnly = true;
             else if (args[i] == "--test-pkcs11") testPkcs11 = true;
+            else if (args[i] == "--xml") xmlMode = true;
             else if (args[i] == "--input" && i + 1 < args.Length) input = args[++i];
             else if (args[i] == "--output" && i + 1 < args.Length) output = args[++i];
             else if (args[i] == "--serial" && i + 1 < args.Length) serial = args[++i];
@@ -185,6 +189,36 @@ class Program
             return 0;
         }
 
+        if (xmlMode)
+        {
+            if (string.IsNullOrEmpty(input) || string.IsNullOrEmpty(output) || string.IsNullOrEmpty(serial))
+            {
+                Console.Error.WriteLine("Loi: Thieu tham so bat buoc cho XML (--input, --output, --serial)");
+                return 1;
+            }
+
+            try
+            {
+                Console.WriteLine($"[INFO] [XML] Dang tim chung thu voi Serial: {serial} trong Windows Store...");
+                X509Certificate2 cert = FindCertificate(serial);
+                if (cert == null)
+                {
+                    Console.Error.WriteLine($"CERTIFICATE_NOT_FOUND: Khong tim thay chung thu nao voi Serial: '{serial}'");
+                    return 1;
+                }
+
+                Console.WriteLine($"[INFO] Da tim thay chung thu: {cert.Subject}");
+                SignXml(input, output, cert, pin);
+                Console.WriteLine("[INFO] Ky XML thanh cong!");
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"[DEBUG_RAW_ERR] {ex.ToString()}");
+                return 1;
+            }
+        }
+
         if (string.IsNullOrEmpty(input) || string.IsNullOrEmpty(output) || string.IsNullOrEmpty(serial))
         {
             Console.Error.WriteLine("Loi: Thieu tham so bat buoc (--input, --output, --serial)");
@@ -333,6 +367,63 @@ class Program
             Console.WriteLine("[DEBUG] Da goi xong MakeSignature.SignDetached...");
         }
         Console.WriteLine("[DEBUG] Da dong va hoan tat PdfStamper.");
+    }
+
+    static void SignXml(string inputPath, string outputPath, X509Certificate2 cert, string pin)
+    {
+        Console.WriteLine("[DEBUG] Bat dau SignXml...");
+        XmlDocument xmlDoc = new XmlDocument();
+        xmlDoc.PreserveWhitespace = true;
+        xmlDoc.Load(inputPath);
+
+        string pkcs11DllPath = FindCompatiblePkcs11Dll(cert);
+        RSA rsaKey = null;
+
+        if (pkcs11DllPath != null)
+        {
+            Console.WriteLine($"[INFO] Phat hien driver PKCS#11: {pkcs11DllPath}. Dung PKCS#11 de ky XML...");
+            var pkcs = new Pkcs11Signature(pkcs11DllPath, pin, "SHA256");
+            rsaKey = new Pkcs11Rsa(pkcs, cert);
+        }
+        else
+        {
+            Console.WriteLine("[INFO] Dung luong ky mac dinh CNG/CSP de ky XML...");
+            rsaKey = CngUserSignature.GetSilentRsaKey(cert, pin);
+        }
+
+        try
+        {
+            SignedXml signedXml = new SignedXml(xmlDoc);
+            signedXml.SigningKey = rsaKey;
+
+            Reference reference = new Reference();
+            reference.Uri = ""; // Sign the entire document
+            reference.DigestMethod = "http://www.w3.org/2001/04/xmlenc#sha256";
+
+            XmlDsigEnvelopedSignatureTransform env = new XmlDsigEnvelopedSignatureTransform();
+            reference.AddTransform(env);
+
+            signedXml.AddReference(reference);
+
+            KeyInfo keyInfo = new KeyInfo();
+            KeyInfoX509Data x509Data = new KeyInfoX509Data(cert);
+            keyInfo.AddClause(x509Data);
+            signedXml.KeyInfo = keyInfo;
+
+            signedXml.SignedInfo.SignatureMethod = "http://www.w3.org/2001/04/xmldsig-more#rsa-sha256";
+
+            signedXml.ComputeSignature();
+
+            XmlElement xmlDigitalSignature = signedXml.GetXml();
+            xmlDoc.DocumentElement.AppendChild(xmlDoc.ImportNode(xmlDigitalSignature, true));
+
+            xmlDoc.Save(outputPath);
+            Console.WriteLine("[DEBUG] Da ky XML va luu file thanh cong.");
+        }
+        finally
+        {
+            if (rsaKey != null) rsaKey.Dispose();
+        }
     }
 
     static string GetCertCN(X509Certificate2 cert)
@@ -802,6 +893,87 @@ public class CngUserSignature : IExternalSignature
             if (hContext != IntPtr.Zero) SCardReleaseContext(hContext);
         }
         return readers;
+    }
+
+    public static RSA GetSilentRsaKey(X509Certificate2 cert, string pin)
+    {
+        var tempSigObj = new CngUserSignature(cert, pin, "SHA256");
+        CRYPT_KEY_PROV_INFO? provInfoOpt = tempSigObj.GetKeyProvInfo();
+        if (provInfoOpt == null)
+        {
+            return cert.GetRSAPrivateKey();
+        }
+
+        var provInfo = provInfoOpt.Value;
+
+        if (provInfo.dwProvType > 0)
+        {
+            try
+            {
+                CspParameters cspParamsSilent = new CspParameters
+                {
+                    ProviderName = provInfo.pwszProvName,
+                    ProviderType = (int)provInfo.dwProvType,
+                    KeyContainerName = provInfo.pwszContainerName,
+                    Flags = CspProviderFlags.UseExistingKey | CspProviderFlags.NoPrompt
+                };
+
+                if (!string.IsNullOrEmpty(pin))
+                {
+                    SecureString securePin = new SecureString();
+                    foreach (char c in pin) securePin.AppendChar(c);
+                    cspParamsSilent.KeyPassword = securePin;
+                }
+
+                var rsaCsp = new RSACryptoServiceProvider(cspParamsSilent);
+                if (!string.IsNullOrEmpty(pin))
+                {
+                    tempSigObj.SetCspPin(rsaCsp, pin, false);
+                }
+                return rsaCsp;
+            }
+            catch
+            {
+                CspParameters cspParamsInteractive = new CspParameters
+                {
+                    ProviderName = provInfo.pwszProvName,
+                    ProviderType = (int)provInfo.dwProvType,
+                    KeyContainerName = provInfo.pwszContainerName,
+                    Flags = CspProviderFlags.UseExistingKey
+                };
+
+                if (!string.IsNullOrEmpty(pin))
+                {
+                    SecureString securePin = new SecureString();
+                    foreach (char c in pin) securePin.AppendChar(c);
+                    cspParamsInteractive.KeyPassword = securePin;
+                }
+
+                var rsaCsp = new RSACryptoServiceProvider(cspParamsInteractive);
+                if (!string.IsNullOrEmpty(pin))
+                {
+                    tempSigObj.SetCspPin(rsaCsp, pin, false);
+                }
+                return rsaCsp;
+            }
+        }
+        else
+        {
+            CngProvider cngProvider = new CngProvider(provInfo.pwszProvName);
+            CngKey cngKey = CngKey.Open(provInfo.pwszContainerName, cngProvider, CngKeyOpenOptions.Silent);
+            if (!string.IsNullOrEmpty(pin))
+            {
+                try
+                {
+                    tempSigObj.SetCngPin(cngKey, pin, true);
+                }
+                catch
+                {
+                    tempSigObj.SetCngPin(cngKey, pin, false);
+                }
+            }
+            return new RSACng(cngKey);
+        }
     }
 
     private void SetCspPin(RSACryptoServiceProvider rsaCsp, string pin, bool isUnicode)
@@ -1542,3 +1714,54 @@ public delegate uint C_SignInit(IntPtr hSession, ref CK_MECHANISM pMechanism, In
 
 [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
 public delegate uint C_Sign(IntPtr hSession, byte[] pData, uint ulDataLen, byte[] pSignature, ref uint pulSignatureLen);
+
+public class Pkcs11Rsa : RSA
+{
+    private readonly Pkcs11Signature _pkcs11;
+    private readonly RSA _publicKey;
+
+    public Pkcs11Rsa(Pkcs11Signature pkcs11, X509Certificate2 cert)
+    {
+        _pkcs11 = pkcs11;
+        _publicKey = cert.GetRSAPublicKey();
+    }
+
+    public override int KeySize => _publicKey.KeySize;
+
+    public override byte[] SignHash(byte[] hash, HashAlgorithmName hashAlgorithm, RSASignaturePadding padding)
+    {
+        if (padding != RSASignaturePadding.Pkcs1)
+            throw new NotSupportedException("Only PKCS#1 padding is supported.");
+        
+        if (hashAlgorithm != HashAlgorithmName.SHA256)
+            throw new NotSupportedException("Only SHA-256 is supported.");
+
+        return _pkcs11.SignTest(hash, true);
+    }
+
+    public override bool VerifyHash(byte[] hash, byte[] signature, HashAlgorithmName hashAlgorithm, RSASignaturePadding padding)
+    {
+        return _publicKey.VerifyHash(hash, signature, hashAlgorithm, padding);
+    }
+
+    public override RSAParameters ExportParameters(bool includePrivateParameters)
+    {
+        if (includePrivateParameters)
+            throw new NotSupportedException("Exporting private parameters is not supported.");
+        return _publicKey.ExportParameters(false);
+    }
+
+    public override void ImportParameters(RSAParameters parameters)
+    {
+        throw new NotSupportedException();
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            _publicKey.Dispose();
+        }
+        base.Dispose(disposing);
+    }
+}

@@ -1305,7 +1305,36 @@ class Tunnel {
 
 function json(res, code, obj) {
   res.writeHead(code, { 'content-type': 'application/json; charset=utf-8' });
-  res.end(JSON.stringify(obj));
+  
+  let responseObj;
+  if (code >= 400) {
+    let errorCode = (obj && obj.error) ? obj.error : -1;
+    let message = (obj && obj.error) ? obj.error : 'Đã có lỗi xảy ra';
+    
+    let data = null;
+    if (obj) {
+      const { error, ...extra } = obj;
+      if (Object.keys(extra).length > 0) {
+        data = extra;
+      }
+    }
+    
+    responseObj = {
+      data: data,
+      message: String(message),
+      error_code: errorCode,
+      status: code
+    };
+  } else {
+    responseObj = {
+      data: obj,
+      message: 'Thành công',
+      error_code: 0,
+      status: code
+    };
+  }
+  
+  res.end(JSON.stringify(responseObj));
 }
 
 function readBody(req, limit) {
@@ -1502,6 +1531,83 @@ async function signPdfNative(cfg, pdfBase64, opts) {
     try { if (fs.existsSync(inputPdfPath)) fs.unlinkSync(inputPdfPath); } catch (_) {}
     try { if (fs.existsSync(outputPdfPath)) fs.unlinkSync(outputPdfPath); } catch (_) {}
     try { if (imagePath && fs.existsSync(imagePath)) fs.unlinkSync(imagePath); } catch (_) {}
+  }
+}
+
+async function signXmlNative(cfg, xmlString, opts) {
+  let exePath = cfg.nativeSignerExePath;
+  if (!exePath) {
+    const packagedPath = path.join(BASE_DIR, 'bin', 'pdf-signer.exe');
+    const devPath = path.join(__dirname, 'bin', 'pdf-signer.exe');
+    exePath = fs.existsSync(packagedPath) ? packagedPath : devPath;
+  }
+  if (!fs.existsSync(exePath)) {
+    throw new Error(`File executable ky so khong ton tai: ${exePath}`);
+  }
+
+  const tempDir = path.join(BASE_DIR, 'temp');
+  if (!fs.existsSync(tempDir)) {
+    fs.mkdirSync(tempDir, { recursive: true });
+  }
+
+  const uniqueId = crypto.randomBytes(8).toString('hex');
+  const inputXmlPath = path.join(tempDir, `in_${uniqueId}.xml`);
+  const outputXmlPath = path.join(tempDir, `out_${uniqueId}.xml`);
+
+  try {
+    fs.writeFileSync(inputXmlPath, xmlString, 'utf8');
+
+    const serial = opts.certificateSerial || cfg.certificateSerial || '';
+    if (!serial) {
+      throw new Error('THIEU_SERIAL: request phai gui certificateSerial hoac cau hinh mac dinh');
+    }
+
+    const pin = opts.pin || cfg.defaultPin || '';
+
+    const args = [
+      '--xml',
+      '--input', inputXmlPath,
+      '--output', outputXmlPath,
+      '--serial', serial,
+    ];
+
+    if (pin) {
+      args.push('--pin', pin);
+    }
+
+    log('info', `Goi pdf-signer.exe de ky XML. Serial: ${serial}, Pin: ${pin ? '***' : '(trong)'}`);
+    
+    const { execFile } = require('node:child_process');
+    try {
+      await new Promise((resolve, reject) => {
+        execFile(exePath, args, { windowsHide: true, timeout: cfg.signTimeoutMs, killSignal: 'SIGKILL' }, (err, stdout, stderr) => {
+          if (err) {
+            log('error', `Loi khi thuc thi pdf-signer.exe de ky XML:\nStdout: ${stdout}\nStderr: ${stderr}`);
+            const errorMsg = stderr.trim() || stdout.trim() || err.message;
+            if (err.killed || err.signal === 'SIGKILL' || errorMsg.includes('NTE_') || errorMsg.includes('CryptographicException')) {
+              log('warn', 'Phat hien loi ket noi thiet bi hoac bi treo (timeout). Tu dong kich hoat self-heal cho SCardSvr...');
+              forceRestartSmartCardService();
+            }
+            reject(new Error(errorMsg));
+          } else {
+            resolve();
+          }
+        });
+      });
+    } catch (e) {
+      throw e;
+    }
+
+    if (!fs.existsSync(outputXmlPath)) {
+      throw new Error('Loi: pdf-signer.exe bao thanh cong nhung khong tim thay file XML dau ra.');
+    }
+
+    const signedXml = fs.readFileSync(outputXmlPath, 'utf8');
+    return Buffer.from(signedXml, 'utf8').toString('base64');
+
+  } finally {
+    try { if (fs.existsSync(inputXmlPath)) fs.unlinkSync(inputXmlPath); } catch (_) {}
+    try { if (fs.existsSync(outputXmlPath)) fs.unlinkSync(outputXmlPath); } catch (_) {}
   }
 }
 
@@ -1910,9 +2016,13 @@ td{padding:7px 4px;border-bottom:1px solid #eee}td:first-child{color:#777;width:
 
         let signedB64;
         try {
-          signedB64 = await plugin.signXml(xml, opts);
+          if (cfg.useNativeSigner) {
+            signedB64 = await mutex.run(() => signXmlNative(cfg, xml, opts));
+          } else {
+            signedB64 = await plugin.signXml(xml, opts);
+          }
         } catch (e) {
-          plugin.invalidateTokenCache();
+          if (!cfg.useNativeSigner) plugin.invalidateTokenCache();
           audit(cfg, { type: 'sign.fail', docType: 'xml', user: claim.sub, error: e.message });
           return json(res, /TOKEN/.test(e.message) ? 503 : 500, { error: e.message });
         }
