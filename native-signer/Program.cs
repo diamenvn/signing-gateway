@@ -52,7 +52,7 @@ class Program
             X509Certificate2 cert = FindCertificate(serial);
             if (cert == null)
             {
-                Console.Error.WriteLine($"Loi: Khong tim thay chung thu nao voi Serial: '{serial}' trong Windows Store.");
+                Console.Error.WriteLine($"CERTIFICATE_NOT_FOUND: Khong tim thay chung thu nao voi Serial: '{serial}' trong Windows Store.");
                 return 1;
             }
 
@@ -64,8 +64,19 @@ class Program
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"Loi khi ky so: {ex.Message}");
-            Console.Error.WriteLine(ex.StackTrace);
+            string msg = ex.Message;
+            if (msg.Contains("wrong PIN") || msg.Contains("incorrect PIN") || msg.Contains("PIN was presented") || msg.Contains("0x8009001A") || msg.Contains("context was acquired as silent"))
+            {
+                Console.Error.WriteLine("WRONG_PIN: Ma PIN cua USB Token khong chinh xac hoac thieu ma PIN.");
+            }
+            else if (msg.Contains("NTE_SILENT_CONTEXT") || msg.Contains("cancelled") || msg.Contains("cancelled by the user") || msg.Contains("0x80090022"))
+            {
+                Console.Error.WriteLine("SIGN_CANCELLED: Thao tac ky bi huy hoac thieu ma PIN.");
+            }
+            else
+            {
+                Console.Error.WriteLine($"UNKNOWN_ERROR: Loi khi ky so: {msg}");
+            }
             return 1;
         }
     }
