@@ -254,6 +254,26 @@ public class CngUserSignature : IExternalSignature
         [In] byte[] pbData,
         uint dwFlags);
 
+    [DllImport("advapi32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool CryptGetUserKey(
+        IntPtr hProv,
+        uint dwKeySpec,
+        out IntPtr phUserKey);
+
+    [DllImport("advapi32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool CryptSetKeyParam(
+        IntPtr hKey,
+        uint dwParam,
+        byte[] pbData,
+        uint dwFlags);
+
+    [DllImport("advapi32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool CryptDestroyKey(
+        IntPtr hKey);
+
     private const int CERT_KEY_PROV_INFO_PROP_ID = 2;
     private const uint PP_KEYEXCHANGE_PIN = 32;
     private const uint PP_SIGNATURE_PIN = 33;
@@ -357,9 +377,32 @@ public class CngUserSignature : IExternalSignature
             {
                 IntPtr hProv = safeHandle.DangerousGetHandle();
                 byte[] pinBytes = isUnicode ? Encoding.Unicode.GetBytes(pin + '\0') : Encoding.ASCII.GetBytes(pin + '\0');
-                bool retSig = CryptSetProvParam(hProv, PP_SIGNATURE_PIN, pinBytes, 0);
-                bool retKey = CryptSetProvParam(hProv, PP_KEYEXCHANGE_PIN, pinBytes, 0);
-                Console.WriteLine($"[DEBUG] CryptSetProvParam isUnicode={isUnicode}: PP_SIGNATURE_PIN: {retSig}, PP_KEYEXCHANGE_PIN: {retKey}");
+                
+                // 1. Thiet lap tren Provider
+                bool retSigProv = CryptSetProvParam(hProv, PP_SIGNATURE_PIN, pinBytes, 0);
+                bool retKeyProv = CryptSetProvParam(hProv, PP_KEYEXCHANGE_PIN, pinBytes, 0);
+                Console.WriteLine($"[DEBUG] CryptSetProvParam isUnicode={isUnicode}: PP_SIGNATURE_PIN: {retSigProv}, PP_KEYEXCHANGE_PIN: {retKeyProv}");
+
+                // 2. Thiet lap tren Key (KP_SIGNATURE_PIN/KP_KEYEXCHANGE_PIN)
+                // Thu ca 2 loai khoa AT_SIGNATURE (2) va AT_KEYEXCHANGE (1)
+                uint[] keySpecs = { 2, 1 };
+                foreach (uint spec in keySpecs)
+                {
+                    IntPtr hKey = IntPtr.Zero;
+                    if (CryptGetUserKey(hProv, spec, out hKey))
+                    {
+                        try
+                        {
+                            bool retSigKey = CryptSetKeyParam(hKey, 33, pinBytes, 0); // KP_SIGNATURE_PIN = 33
+                            bool retKeyKey = CryptSetKeyParam(hKey, 32, pinBytes, 0); // KP_KEYEXCHANGE_PIN = 32
+                            Console.WriteLine($"[DEBUG] CryptSetKeyParam spec={spec} isUnicode={isUnicode}: KP_SIGNATURE_PIN: {retSigKey}, KP_KEYEXCHANGE_PIN: {retKeyKey}");
+                        }
+                        finally
+                        {
+                            CryptDestroyKey(hKey);
+                        }
+                    }
+                }
             }
         }
     }
