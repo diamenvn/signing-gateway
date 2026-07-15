@@ -144,8 +144,8 @@ class Program
 
                 // 1. Ky bang CNG (Gold Standard)
                 byte[] cngSig = null;
-                CngProvider cngProvider = new CngProvider(provInfo.Value.pwszProvName);
-                using (CngKey cngKey = CngKey.Open(provInfo.Value.pwszContainerName, cngProvider, CngKeyOpenOptions.None))
+                CngProvider cngProvider = new CngProvider(provInfo.pwszProvName);
+                using (CngKey cngKey = CngKey.Open(provInfo.pwszContainerName, cngProvider, CngKeyOpenOptions.None))
                 {
                     byte[] pinBytes = Encoding.Unicode.GetBytes(pin + '\0');
                     CngProperty pinProperty = new CngProperty("SmartCardPin", pinBytes, CngPropertyOptions.None);
@@ -1017,76 +1017,6 @@ public class Pkcs11Signature : IExternalSignature
     private string _pin;
     private string _hashAlgorithm;
 
-    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Ansi)]
-    private static extern IntPtr LoadLibrary(string lpFileName);
-
-    [DllImport("kernel32.dll", CharSet = CharSet.Ansi, ExactSpelling = true, SetLastError = true)]
-    private static extern IntPtr GetProcAddress(IntPtr hModule, string procName);
-
-    [DllImport("kernel32.dll", SetLastError = true)]
-    private static extern bool FreeLibrary(IntPtr hModule);
-
-    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-    private delegate uint C_Initialize(IntPtr pReserved);
-
-    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-    private delegate uint C_Finalize(IntPtr pReserved);
-
-    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-    private delegate uint C_GetSlotList(byte tokenPresent, IntPtr pSlotList, ref uint pulCount);
-
-    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-    private delegate uint C_OpenSession(uint slotID, uint flags, IntPtr pApplication, IntPtr Notify, out IntPtr phSession);
-
-    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-    private delegate uint C_CloseSession(IntPtr hSession);
-
-    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-    private delegate uint C_Login(IntPtr hSession, uint userType, byte[] pPin, uint ulPinLen);
-
-    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-    private delegate uint C_Logout(IntPtr hSession);
-
-    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-    private delegate uint C_FindObjectsInit(IntPtr hSession, CK_ATTRIBUTE[] pTemplate, uint ulCount);
-
-    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-    private delegate uint C_FindObjects(IntPtr hSession, IntPtr phObject, uint ulMaxObjectCount, out uint pulObjectCount);
-
-    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-    private delegate uint C_FindObjectsFinal(IntPtr hSession);
-
-    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-    private delegate uint C_GetAttributeValue(IntPtr hSession, IntPtr hObject, CK_ATTRIBUTE[] pTemplate, uint ulCount);
-
-    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-    private delegate uint C_SignInit(IntPtr hSession, ref CK_MECHANISM pMechanism, IntPtr hKey);
-
-    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-    private delegate uint C_Sign(IntPtr hSession, byte[] pData, uint ulDataLen, byte[] pSignature, ref uint pulSignatureLen);
-
-    [StructLayout(LayoutKind.Sequential)]
-    struct CK_ATTRIBUTE
-    {
-        public uint type;
-        public IntPtr pValue;
-        public uint ulValueLen;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    struct CK_MECHANISM
-    {
-        public uint mechanism;
-        public IntPtr pParameter;
-        public uint ulParameterLen;
-    }
-
-    private const uint CKA_CLASS = 0x00000000;
-    private const uint CKO_PRIVATE_KEY = 0x00000003;
-    private const uint CKM_RSA_PKCS = 0x00000001;
-    private const uint CKU_USER = 1;
-    private const uint CKF_SERIAL_SESSION = 0x00000004;
-
     public Pkcs11Signature(string dllPath, string pin, string hashAlgorithm)
     {
         _dllPath = dllPath;
@@ -1127,7 +1057,7 @@ public class Pkcs11Signature : IExternalSignature
 
     private T GetFunc<T>(IntPtr hModule, string name) where T : Delegate
     {
-        IntPtr proc = GetProcAddress(hModule, name);
+        IntPtr proc = Win32.GetProcAddress(hModule, name);
         if (proc == IntPtr.Zero)
         {
             // Fallback ho tro ten bi decorated tren 32-bit (x86) Windows
@@ -1136,13 +1066,13 @@ public class Pkcs11Signature : IExternalSignature
             {
                 // Thu dang _Name@size
                 string dec1 = $"_{name}@{size}";
-                proc = GetProcAddress(hModule, dec1);
+                proc = Win32.GetProcAddress(hModule, dec1);
                 
                 // Thu dang Name@size
                 if (proc == IntPtr.Zero)
                 {
                     string dec2 = $"{name}@{size}";
-                    proc = GetProcAddress(hModule, dec2);
+                    proc = Win32.GetProcAddress(hModule, dec2);
                 }
             }
         }
@@ -1156,7 +1086,7 @@ public class Pkcs11Signature : IExternalSignature
     public byte[] Sign(byte[] message)
     {
         Console.WriteLine($"[DEBUG] Pkcs11: Loading library {_dllPath}...");
-        IntPtr hModule = LoadLibrary(_dllPath);
+        IntPtr hModule = Win32.LoadLibrary(_dllPath);
         if (hModule == IntPtr.Zero)
         {
             int err = Marshal.GetLastWin32Error();
@@ -1205,7 +1135,7 @@ public class Pkcs11Signature : IExternalSignature
 
                     Console.WriteLine("[DEBUG] Pkcs11: Opening session...");
                     IntPtr hSession;
-                    rv = cOpenSession(slotId, CKF_SERIAL_SESSION, IntPtr.Zero, IntPtr.Zero, out hSession);
+                    rv = cOpenSession(slotId, Pkcs11Const.CKF_SERIAL_SESSION, IntPtr.Zero, IntPtr.Zero, out hSession);
                     if (rv != 0)
                         throw new Exception($"C_OpenSession failed: 0x{rv:X8}");
 
@@ -1213,7 +1143,7 @@ public class Pkcs11Signature : IExternalSignature
                     {
                         Console.WriteLine("[DEBUG] Pkcs11: Logging in...");
                         byte[] pinBytes = Encoding.ASCII.GetBytes(_pin);
-                        rv = cLogin(hSession, CKU_USER, pinBytes, (uint)pinBytes.Length);
+                        rv = cLogin(hSession, Pkcs11Const.CKU_USER, pinBytes, (uint)pinBytes.Length);
                         if (rv != 0 && rv != 0x00000100) // CKR_USER_ALREADY_LOGGED_IN = 0x00000100
                             throw new Exception($"C_Login failed (wrong PIN?): 0x{rv:X8}");
 
@@ -1261,7 +1191,7 @@ public class Pkcs11Signature : IExternalSignature
                                                 uint classVal = (uint)Marshal.ReadInt32(pClassVal);
                                                 Console.WriteLine($"[DEBUG] Pkcs11: Object handle={hObj.ToInt32()}, class={classVal}");
                                                 
-                                                if (classVal == CKO_PRIVATE_KEY) // CKO_PRIVATE_KEY = 3
+                                                if (classVal == Pkcs11Const.CKO_PRIVATE_KEY) // CKO_PRIVATE_KEY = 3
                                                 {
                                                     hKey = hObj;
                                                     Console.WriteLine($"[DEBUG] Pkcs11: Selected private key handle={hKey.ToInt32()}");
@@ -1307,7 +1237,7 @@ public class Pkcs11Signature : IExternalSignature
 
                             Console.WriteLine("[DEBUG] Pkcs11: Initializing sign mechanism...");
                             CK_MECHANISM mech = new CK_MECHANISM();
-                            mech.mechanism = CKM_RSA_PKCS;
+                            mech.mechanism = Pkcs11Const.CKM_RSA_PKCS;
                             mech.pParameter = IntPtr.Zero;
                             mech.ulParameterLen = 0;
 
@@ -1532,7 +1462,83 @@ public class Pkcs11Signature : IExternalSignature
         }
         finally
         {
-            FreeLibrary(hModule);
+            Win32.FreeLibrary(hModule);
         }
     }
 }
+
+public static class Win32
+{
+    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Ansi)]
+    public static extern IntPtr LoadLibrary(string lpFileName);
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Ansi, ExactSpelling = true, SetLastError = true)]
+    public static extern IntPtr GetProcAddress(IntPtr hModule, string procName);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    public static extern bool FreeLibrary(IntPtr hModule);
+}
+
+public static class Pkcs11Const
+{
+    public const uint CKA_CLASS = 0x00000000;
+    public const uint CKO_PRIVATE_KEY = 0x00000003;
+    public const uint CKM_RSA_PKCS = 0x00000001;
+    public const uint CKU_USER = 1;
+    public const uint CKF_SERIAL_SESSION = 0x00000004;
+}
+
+[StructLayout(LayoutKind.Sequential)]
+public struct CK_ATTRIBUTE
+{
+    public uint type;
+    public IntPtr pValue;
+    public uint ulValueLen;
+}
+
+[StructLayout(LayoutKind.Sequential)]
+public struct CK_MECHANISM
+{
+    public uint mechanism;
+    public IntPtr pParameter;
+    public uint ulParameterLen;
+}
+
+[UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+public delegate uint C_Initialize(IntPtr pReserved);
+
+[UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+public delegate uint C_Finalize(IntPtr pReserved);
+
+[UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+public delegate uint C_GetSlotList(byte tokenPresent, IntPtr pSlotList, ref uint pulCount);
+
+[UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+public delegate uint C_OpenSession(uint slotID, uint flags, IntPtr pApplication, IntPtr Notify, out IntPtr phSession);
+
+[UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+public delegate uint C_CloseSession(IntPtr hSession);
+
+[UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+public delegate uint C_Login(IntPtr hSession, uint userType, byte[] pPin, uint ulPinLen);
+
+[UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+public delegate uint C_Logout(IntPtr hSession);
+
+[UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+public delegate uint C_FindObjectsInit(IntPtr hSession, CK_ATTRIBUTE[] pTemplate, uint ulCount);
+
+[UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+public delegate uint C_FindObjects(IntPtr hSession, IntPtr phObject, uint ulMaxObjectCount, out uint pulObjectCount);
+
+[UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+public delegate uint C_FindObjectsFinal(IntPtr hSession);
+
+[UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+public delegate uint C_GetAttributeValue(IntPtr hSession, IntPtr hObject, CK_ATTRIBUTE[] pTemplate, uint ulCount);
+
+[UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+public delegate uint C_SignInit(IntPtr hSession, ref CK_MECHANISM pMechanism, IntPtr hKey);
+
+[UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+public delegate uint C_Sign(IntPtr hSession, byte[] pData, uint ulDataLen, byte[] pSignature, ref uint pulSignatureLen);
