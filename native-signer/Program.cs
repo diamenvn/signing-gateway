@@ -354,17 +354,7 @@ class Program
 
             // Chen hinh anh ben trai va text ben phai neu co anh
             bool hasImage = !string.IsNullOrEmpty(imagePath) && File.Exists(imagePath);
-            if (hasImage)
-            {
-                iTextSharp.text.Image img = iTextSharp.text.Image.GetInstance(imagePath);
-                appearance.SignatureGraphic = img;
-                appearance.SignatureRenderingMode = PdfSignatureAppearance.RenderingMode.GRAPHIC_AND_DESCRIPTION;
-            }
-            else
-            {
-                appearance.SignatureRenderingMode = PdfSignatureAppearance.RenderingMode.DESCRIPTION;
-            }
-
+            appearance.SignatureRenderingMode = PdfSignatureAppearance.RenderingMode.DESCRIPTION;
             appearance.Acro6Layers = true;
 
             BaseColor textColor = BaseColor.BLACK;
@@ -407,44 +397,73 @@ class Program
             string winDir = Environment.GetEnvironmentVariable("windir") ?? "C:\\Windows";
             string fontsDir = Path.Combine(winDir, "Fonts");
             
-            string[] fontCandidates = {
-                Path.Combine(fontsDir, "arial.ttf"),
-                Path.Combine(fontsDir, "Arial.ttf"),
-                Path.Combine(fontsDir, "ARIAL.TTF"),
-                Path.Combine(fontsDir, "times.ttf"),
-                Path.Combine(fontsDir, "Times.ttf"),
-                Path.Combine(fontsDir, "TIMES.TTF"),
-                Path.Combine(fontsDir, "tahoma.ttf"),
-                Path.Combine(fontsDir, "Tahoma.ttf"),
-                Path.Combine(fontsDir, "TAHOMA.TTF"),
-                Path.Combine(fontsDir, "calibri.ttf"),
-                Path.Combine(fontsDir, "Calibri.ttf"),
-                Path.Combine(fontsDir, "segoeui.ttf")
+            List<string> fontCandidates = new List<string>();
+            string winDir = Environment.GetEnvironmentVariable("windir") ?? "C:\\Windows";
+            string systemFontsDir = Path.Combine(winDir, "Fonts");
+            string userFontsDir = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "Microsoft\\Windows\\Fonts"
+            );
+            string appDir = AppDomain.CurrentDomain.BaseDirectory;
+
+            // 1. Uu tien font dat cung thu muc file chay (neu co)
+            fontCandidates.Add(Path.Combine(appDir, "arial.ttf"));
+            fontCandidates.Add(Path.Combine(appDir, "Arial.ttf"));
+            fontCandidates.Add(Path.Combine(appDir, "font.ttf"));
+
+            // 2. Danh sach cac font candidate trong he thong
+            string[] fontNames = {
+                "arial.ttf", "Arial.ttf", "ARIAL.TTF",
+                "times.ttf", "Times.ttf", "TIMES.TTF",
+                "tahoma.ttf", "Tahoma.ttf", "TAHOMA.TTF",
+                "calibri.ttf", "Calibri.ttf",
+                "segoeui.ttf"
             };
+
+            foreach (var name in fontNames)
+            {
+                fontCandidates.Add(Path.Combine(systemFontsDir, name));
+                fontCandidates.Add(Path.Combine(userFontsDir, name));
+            }
 
             foreach (var path in fontCandidates)
             {
                 try
                 {
                     bf = BaseFont.CreateFont(path, BaseFont.IDENTITY_H, BaseFont.EMBEDDED);
-                    if (bf != null) break;
+                    if (bf != null)
+                    {
+                        Console.WriteLine($"[DEBUG] Da load thanh cong font: {path}");
+                        break;
+                    }
                 }
-                catch {}
+                catch (Exception ex)
+                {
+                    // Chi in ra log khi file thuc su ton tai ma load loi de giam rac log
+                    if (File.Exists(path))
+                    {
+                        Console.WriteLine($"[DEBUG] Thu load font {path} nhung loi: {ex.Message}");
+                    }
+                }
             }
 
             if (bf == null)
             {
                 try
                 {
-                    if (Directory.Exists(fontsDir))
+                    if (Directory.Exists(systemFontsDir))
                     {
-                        var ttfFiles = Directory.GetFiles(fontsDir, "*.ttf");
+                        var ttfFiles = Directory.GetFiles(systemFontsDir, "*.ttf");
                         foreach (var path in ttfFiles)
                         {
                             try
                             {
                                 bf = BaseFont.CreateFont(path, BaseFont.IDENTITY_H, BaseFont.EMBEDDED);
-                                if (bf != null) break;
+                                if (bf != null)
+                                {
+                                    Console.WriteLine($"[DEBUG] Da load thanh cong font fallback tu dong: {path}");
+                                    break;
+                                }
                             }
                             catch {}
                         }
@@ -457,6 +476,23 @@ class Program
             {
                 Console.WriteLine("[WARN] Khong load duoc font Unicode nao, quay lai Helvetica.");
                 bf = BaseFont.CreateFont(BaseFont.HELVETICA, BaseFont.CP1252, BaseFont.NOT_EMBEDDED);
+            }
+
+            if (hasImage)
+            {
+                try
+                {
+                    iTextSharp.text.Image img = iTextSharp.text.Image.GetInstance(imagePath);
+                    img.ScaleToFit(w / 2 - 6, h - 6);
+                    float imgX = (w / 2 - img.ScaledWidth) / 2;
+                    float imgY = (h - img.ScaledHeight) / 2;
+                    img.SetAbsolutePosition(imgX, imgY);
+                    layer2.AddImage(img);
+                }
+                catch (Exception imgEx)
+                {
+                    Console.WriteLine($"[DEBUG] Loi ve anh vao Layer 2: {imgEx.Message}");
+                }
             }
 
             Font font = new Font(bf, 8.5f, Font.NORMAL, textColor);
