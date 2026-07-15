@@ -79,11 +79,13 @@ class Program
                             foreach (var f in files)
                             {
                                 Console.WriteLine($"PKCS11_DLL:{Path.GetFileName(f)}|PATH:{f}");
+                                DumpDllExports(f);
                             }
                             var pkcsFiles = Directory.GetFiles(dir, "*pkcs11*.dll");
                             foreach (var f in pkcsFiles)
                             {
                                 Console.WriteLine($"PKCS11_DLL:{Path.GetFileName(f)}|PATH:{f}");
+                                DumpDllExports(f);
                             }
                         }
                         catch {}
@@ -293,6 +295,84 @@ class Program
             }
         }
         return null;
+    }
+
+    static void DumpDllExports(string dllPath)
+    {
+        try
+        {
+            Console.WriteLine($"=== EXPORTS FOR {Path.GetFileName(dllPath)} ===");
+            byte[] fileBytes = File.ReadAllBytes(dllPath);
+            int dosHeaderActive = BitConverter.ToInt32(fileBytes, 0x3C);
+            int peHeaderSign = BitConverter.ToInt32(fileBytes, dosHeaderActive);
+            if (peHeaderSign != 0x00004550)
+            {
+                Console.WriteLine("Not a valid PE file.");
+                return;
+            }
+
+            int numSections = BitConverter.ToInt16(fileBytes, dosHeaderActive + 6);
+            int optHeaderSize = BitConverter.ToInt16(fileBytes, dosHeaderActive + 20);
+            int optHeaderOffset = dosHeaderActive + 24;
+
+            ushort magic = BitConverter.ToUInt16(fileBytes, optHeaderOffset);
+            bool is64 = magic == 0x20b;
+
+            int exportDirRvaOffset = is64 ? (optHeaderOffset + 112) : (optHeaderOffset + 96);
+            int exportDirRva = BitConverter.ToInt32(fileBytes, exportDirRvaOffset);
+
+            if (exportDirRva == 0)
+            {
+                Console.WriteLine("No exports found.");
+                return;
+            }
+
+            int sectionHeaderOffset = optHeaderOffset + optHeaderSize;
+            int rawOffset = 0;
+            for (int i = 0; i < numSections; i++)
+            {
+                int secOffset = sectionHeaderOffset + i * 40;
+                int secVirtualAddress = BitConverter.ToInt32(fileBytes, secOffset + 12);
+                int secSizeOfRawData = BitConverter.ToInt32(fileBytes, secOffset + 16);
+                int secPointerToRawData = BitConverter.ToInt32(fileBytes, secOffset + 20);
+
+                if (exportDirRva >= secVirtualAddress && exportDirRva < secVirtualAddress + secSizeOfRawData)
+                {
+                    rawOffset = secPointerToRawData - secVirtualAddress;
+                    break;
+                }
+            }
+
+            if (rawOffset == 0)
+            {
+                Console.WriteLine("Export directory section not found.");
+                return;
+            }
+
+            int exportDirFileOffset = exportDirRva + rawOffset;
+            int numNames = BitConverter.ToInt32(fileBytes, exportDirFileOffset + 24);
+            int addressOfNamesRva = BitConverter.ToInt32(fileBytes, exportDirFileOffset + 32);
+            int addressOfNamesFileOffset = addressOfNamesRva + rawOffset;
+
+            for (int i = 0; i < numNames && i < 100; i++)
+            {
+                int nameRva = BitConverter.ToInt32(fileBytes, addressOfNamesFileOffset + i * 4);
+                int nameFileOffset = nameRva + rawOffset;
+                
+                StringBuilder sb = new StringBuilder();
+                int idx = nameFileOffset;
+                while (fileBytes[idx] != 0)
+                {
+                    sb.Append((char)fileBytes[idx]);
+                    idx++;
+                }
+                Console.WriteLine($"EXPORT_FUNC:{sb.ToString()}");
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error parsing exports: {ex.Message}");
+        }
     }
 }
 
