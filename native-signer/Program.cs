@@ -333,12 +333,32 @@ public class CngUserSignature : IExternalSignature
                     
                     if (rsa is RSACng rsaCng)
                     {
-                        if (!string.IsNullOrEmpty(_pin))
+                        string providerName = rsaCng.Key.Provider.Provider;
+                        string keyName = rsaCng.Key.KeyName;
+                        Console.WriteLine($"[DEBUG] Da tu dong do tim KSP Provider: {providerName}, KeyName: {keyName}");
+
+                        // Dong handle hien tai de mo lai voi quyen Silent tranh driver bat popup bat ngo
+                        rsa.Dispose();
+
+                        Console.WriteLine("[DEBUG] Dang mo lai khoa bang CNG KSP voi tuy chon Silent...");
+                        CngProvider cngProvider = new CngProvider(providerName);
+                        using (CngKey cngKey = CngKey.Open(keyName, cngProvider, CngKeyOpenOptions.Silent))
                         {
-                            Console.WriteLine("[DEBUG] Set PIN cho khoa RSACng...");
-                            byte[] pinBytes = Encoding.Unicode.GetBytes(_pin + '\0');
-                            CngProperty pinProperty = new CngProperty("SmartCardPin", pinBytes, CngPropertyOptions.None);
-                            rsaCng.Key.SetProperty(pinProperty);
+                            if (!string.IsNullOrEmpty(_pin))
+                            {
+                                Console.WriteLine("[DEBUG] Dang set PIN cho CngKey...");
+                                byte[] pinBytes = Encoding.Unicode.GetBytes(_pin + '\0');
+                                CngProperty pinProperty = new CngProperty("SmartCardPin", pinBytes, CngPropertyOptions.None);
+                                cngKey.SetProperty(pinProperty);
+                            }
+
+                            using (var rsaCngSilent = new RSACng(cngKey))
+                            {
+                                Console.WriteLine("[DEBUG] Dang ky bang RSACng Silent...");
+                                byte[] sig = rsaCngSilent.SignData(message, new HashAlgorithmName(_hashAlgorithm), RSASignaturePadding.Pkcs1);
+                                Console.WriteLine("[DEBUG] Ky bang RSACng Silent thanh cong.");
+                                return sig;
+                            }
                         }
                     }
                     else if (rsa is RSACryptoServiceProvider rsaCsp)
