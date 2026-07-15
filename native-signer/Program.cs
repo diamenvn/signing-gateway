@@ -471,24 +471,35 @@ class Program
         }
 
         byte[] certRawData = cert.RawData;
+        Console.WriteLine($"[DEBUG] PKCS11: Tim DLL tuong thich cho serial. Tim thay {candidateDlls.Count} file DLL ung vien...");
         foreach (var dll in candidateDlls)
         {
             try
             {
                 if (CheckIfDllContainsCert(dll, certRawData))
                 {
+                    Console.WriteLine($"[DEBUG] PKCS11: Tim thay DLL khop! -> {dll}");
                     return dll;
                 }
             }
-            catch {}
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[DEBUG] PKCS11: Loi khi check DLL {dll}: {ex.Message}");
+            }
         }
+        Console.WriteLine("[DEBUG] PKCS11: Khong tim thay DLL PKCS#11 nao chua certificate nay.");
         return null;
     }
 
     static bool CheckIfDllContainsCert(string dllPath, byte[] certRawData)
     {
+        Console.WriteLine($"[DEBUG] PKCS11 Check: Loading {dllPath}...");
         IntPtr hModule = Win32.LoadLibrary(dllPath);
-        if (hModule == IntPtr.Zero) return false;
+        if (hModule == IntPtr.Zero)
+        {
+            Console.WriteLine($"[DEBUG] PKCS11 Check: LoadLibrary {dllPath} failed.");
+            return false;
+        }
 
         try
         {
@@ -506,23 +517,36 @@ class Program
                 cCloseSession == null || cFindObjectsInit == null || cFindObjects == null || 
                 cFindObjectsFinal == null || cGetAttributeValue == null)
             {
+                Console.WriteLine($"[DEBUG] PKCS11 Check: DLL {dllPath} thieu ham PKCS11.");
                 return false;
             }
 
             uint rv = cInitialize(IntPtr.Zero);
-            if (rv != 0 && rv != 0x00000191) return false;
+            if (rv != 0 && rv != 0x00000191)
+            {
+                Console.WriteLine($"[DEBUG] PKCS11 Check: C_Initialize failed with code 0x{rv:X8}");
+                return false;
+            }
 
             try
             {
                 uint count = 0;
                 rv = cGetSlotList(1, IntPtr.Zero, ref count);
-                if (rv != 0 || count == 0) return false;
+                if (rv != 0 || count == 0)
+                {
+                    Console.WriteLine($"[DEBUG] PKCS11 Check: cGetSlotList failed or count=0: rv=0x{rv:X8}, count={count}");
+                    return false;
+                }
 
                 IntPtr pSlots = Marshal.AllocHGlobal((int)count * 4);
                 try
                 {
                     rv = cGetSlotList(1, pSlots, ref count);
-                    if (rv != 0) return false;
+                    if (rv != 0)
+                    {
+                        Console.WriteLine($"[DEBUG] PKCS11 Check: cGetSlotList(2) failed: rv=0x{rv:X8}");
+                        return false;
+                    }
 
                     int[] slots = new int[count];
                     Marshal.Copy(pSlots, slots, 0, (int)count);
@@ -531,7 +555,11 @@ class Program
                     {
                         IntPtr hSession;
                         rv = cOpenSession((uint)slotId, Pkcs11Const.CKF_SERIAL_SESSION, IntPtr.Zero, IntPtr.Zero, out hSession);
-                        if (rv != 0) continue;
+                        if (rv != 0)
+                        {
+                            Console.WriteLine($"[DEBUG] PKCS11 Check: cOpenSession slot {slotId} failed: rv=0x{rv:X8}");
+                            continue;
+                        }
 
                         try
                         {
