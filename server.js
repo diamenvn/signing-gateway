@@ -135,6 +135,7 @@ const DEFAULTS = {
     botToken: '',
     chatId: '',
     minLevel: 'warn',   // chi gui tu muc nay tro len: info < ok < warn < error
+    sendLevels: ['warn', 'error'], // mang chua cac level can gui (vi du: ['info', 'ok', 'warn', 'error'])
     silent: false,      // true = gui khong keu thong bao
   },
 
@@ -149,7 +150,7 @@ const DEFAULTS = {
   tsaUsername: '',
   tsaPassword: '',
 
-  signTimeoutMs: 120000,
+  signTimeoutMs: 15000,
   jobTtlMinutes: 30,
   maxPdfBytes: 20 * 1024 * 1024,
 
@@ -257,6 +258,9 @@ const Telegram = {
   // Chi gui log tu muc nay tro len. Mac dinh: warn (bo qua ok/info).
   shouldSend(level) {
     if (!this.enabled) return false;
+    if (Array.isArray(this.cfg.sendLevels)) {
+      return this.cfg.sendLevels.includes(level);
+    }
     const rank = { info: 0, ok: 1, warn: 2, error: 3 };
     const min = this.cfg.minLevel || 'warn';
     return (rank[level] ?? 0) >= (rank[min] ?? 2);
@@ -1336,7 +1340,7 @@ async function signPdfNative(cfg, pdfBase64, opts) {
     throw new Error(`File executable ky so khong ton tai: ${exePath}`);
   }
 
-  const tempDir = path.join(__dirname, 'temp');
+  const tempDir = path.join(BASE_DIR, 'temp');
   if (!fs.existsSync(tempDir)) {
     fs.mkdirSync(tempDir, { recursive: true });
   }
@@ -1400,16 +1404,28 @@ async function signPdfNative(cfg, pdfBase64, opts) {
     log('info', `Goi pdf-signer.exe de ky file. Serial: ${serial}, Pin: ${pin ? '***' : '(trong)'}`);
     
     const { execFile } = require('node:child_process');
-    await new Promise((resolve, reject) => {
-      execFile(exePath, args, { windowsHide: true }, (err, stdout, stderr) => {
-        if (err) {
-          log('error', `Loi khi thuc thi pdf-signer.exe:\nStdout: ${stdout}\nStderr: ${stderr}`);
-          reject(new Error(stderr.trim() || `Loi thuc thi pdf-signer.exe: ${err.message}`));
-        } else {
-          resolve();
-        }
+    try {
+      await new Promise((resolve, reject) => {
+        execFile(exePath, args, { windowsHide: true, timeout: cfg.signTimeoutMs, killSignal: 'SIGKILL' }, (err, stdout, stderr) => {
+          if (err) {
+            log('error', `Loi khi thuc thi pdf-signer.exe:\nStdout: ${stdout}\nStderr: ${stderr}`);
+            const errorMsg = stderr.trim() || stdout.trim() || err.message;
+            
+            // Neu bi kill do timeout, hoac gap loi driver cua thiet bi
+            if (err.killed || err.signal === 'SIGKILL' || errorMsg.includes('NTE_') || errorMsg.includes('CryptographicException')) {
+              log('warn', 'Phat hien loi ket noi thiet bi hoac bi treo (timeout). Tu dong kich hoat self-heal cho SCardSvr...');
+              forceRestartSmartCardService();
+            }
+            
+            reject(new Error(errorMsg));
+          } else {
+            resolve();
+          }
+        });
       });
-    });
+    } catch (e) {
+      throw e;
+    }
 
     // 6. Doc file da ky va convert lai base64
     if (!fs.existsSync(outputPdfPath)) {
@@ -1471,6 +1487,29 @@ function checkCertPresent(serial) {
     execSync(`certutil -silent -store -user MY "${clean}"`, { stdio: 'ignore', windowsHide: true });
     return true;
   } catch (_) {
+    return false;
+  }
+}
+
+function forceRestartSmartCardService() {
+  if (process.platform !== 'win32') return false;
+  const { execSync } = require('node:child_process');
+  try {
+    log('info', 'Dang tu dong khoi dong lai dich vu Smart Card (SCardSvr)...');
+    try {
+      const pidBuf = execSync('powershell -Command "(Get-CimInstance Win32_Service -Filter \\"Name=\'SCardSvr\'\\").ProcessId"', { windowsHide: true });
+      const pid = parseInt(pidBuf.toString().trim(), 10);
+      if (pid > 0) {
+        execSync(`taskkill /F /PID ${pid}`, { stdio: 'ignore', windowsHide: true });
+      }
+    } catch (e) {
+      log('warn', `Khong the taskkill SCardSvr: ${e.message}`);
+    }
+    execSync('net start SCardSvr', { stdio: 'ignore', windowsHide: true });
+    log('info', 'Khoi dong lai dich vu SCardSvr thanh cong.');
+    return true;
+  } catch (e) {
+    log('error', `Loi khi khoi dong lai SCardSvr: ${e.message}`);
     return false;
   }
 }
@@ -2217,11 +2256,40 @@ async function main() {
     console.log('  Da gui. Kiem tra Telegram cua ban.\n');
     process.exit(0);
   }
+  if (arg === '--install') {
+    const { execSync } = require('node:child_process');
+    try {
+      const exePath = process.execPath;
+      console.log(`Installing task SigningGateway for: ${exePath}`);
+      execSync(`schtasks /create /tn "SigningGateway" /tr "\\"${exePath}\\"" /sc onstart /ru "SYSTEM" /rl highest /f`, { stdio: 'inherit' });
+      execSync(`schtasks /run /tn "SigningGateway"`, { stdio: 'inherit' });
+      console.log('Installed and started SigningGateway service task successfully.');
+      process.exit(0);
+    } catch (e) {
+      console.error(`Failed to install service task: ${e.message}`);
+      process.exit(1);
+    }
+  }
+  if (arg === '--uninstall') {
+    const { execSync } = require('node:child_process');
+    try {
+      console.log('Uninstalling task SigningGateway...');
+      try { execSync(`schtasks /end /tn "SigningGateway"`, { stdio: 'ignore' }); } catch (_) {}
+      execSync(`schtasks /delete /tn "SigningGateway" /f`, { stdio: 'inherit' });
+      console.log('Uninstalled SigningGateway service task successfully.');
+      process.exit(0);
+    } catch (e) {
+      console.error(`Failed to uninstall service task: ${e.message}`);
+      process.exit(1);
+    }
+  }
   if (arg === '--diag')    return runDiag(process.argv[3]);
   if (arg === '--pintest') return runPinTest(process.argv[3]);
   if (arg === '--help' || arg === '-h') {
     console.log(`
   signing-gateway.exe                  chay gateway
+  signing-gateway.exe --install        cai dat gateway chay ngam he thong (Windows Service)
+  signing-gateway.exe --uninstall      go cai dat gateway chay ngam
   signing-gateway.exe --license        do license: thu nhieu domain, in response tho
   signing-gateway.exe --probe          do tim plugin, liet ke certificate
   signing-gateway.exe --diag <pdf>     chan doan SignPDF, xem plugin tra ve gi

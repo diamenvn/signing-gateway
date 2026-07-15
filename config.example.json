@@ -16,7 +16,7 @@
   "tsaUsername": "",
   "tsaPassword": "",
 
-  "signTimeoutMs": 120000,
+  "signTimeoutMs": 15000,
   "jobTtlMinutes": 30,
   "maxPdfBytes": 20971520,
 
@@ -24,5 +24,12 @@
     "enabled": true,
     "token": "",
     "exePath": ""
+  },
+  "telegram": {
+    "enabled": false,
+    "botToken": "",
+    "chatId": "",
+    "minLevel": "warn",
+    "sendLevels": ["warn", "error"]
   }
 }

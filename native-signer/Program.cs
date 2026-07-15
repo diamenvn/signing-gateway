@@ -267,7 +267,36 @@ public class CngUserSignature : IExternalSignature
         var provInfo = provInfoOpt.Value;
         Console.WriteLine($"[DEBUG] KeyProvInfo: Container={provInfo.pwszContainerName}, Provider={provInfo.pwszProvName}, Type={provInfo.dwProvType}");
 
-        // 1. Neu la CSP truyen thong (dwProvType > 0)
+        // 1. Luon thu mo bang Microsoft Smart Card KSP (CNG) truoc (ho tro set PIN ngam tot nhat va cam GUI 100%)
+        try
+        {
+            Console.WriteLine("[DEBUG] Thu mo bang Microsoft Smart Card Key Storage Provider (CNG)...");
+            CngProvider cngProvider = new CngProvider("Microsoft Smart Card Key Storage Provider");
+            using (CngKey cngKey = CngKey.Open(provInfo.pwszContainerName, cngProvider, CngKeyOpenOptions.Silent))
+            {
+                if (!string.IsNullOrEmpty(_pin))
+                {
+                    Console.WriteLine("[DEBUG] Dang set PIN cho CngKey...");
+                    byte[] pinBytes = Encoding.Unicode.GetBytes(_pin + '\0');
+                    CngProperty pinProperty = new CngProperty("SmartCardPin", pinBytes, CngPropertyOptions.None);
+                    cngKey.SetProperty(pinProperty);
+                }
+
+                using (var rsaCng = new RSACng(cngKey))
+                {
+                    Console.WriteLine("[DEBUG] Dang ky bang RSACng...");
+                    byte[] sig = rsaCng.SignData(message, new HashAlgorithmName(_hashAlgorithm), RSASignaturePadding.Pkcs1);
+                    Console.WriteLine("[DEBUG] Ky bang RSACng thanh cong.");
+                    return sig;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine("[DEBUG] (Bo qua) Thu CNG Microsoft Smart Card KSP that bai: " + ex.Message);
+        }
+
+        // 2. Neu la CSP truyen thong (dwProvType > 0) va CNG that bai
         if (provInfo.dwProvType > 0)
         {
             Console.WriteLine("[DEBUG] Khoa la CSP. Dang khoi tao RSACryptoServiceProvider truc tiep bang Container Name (NoPrompt)...");
@@ -294,10 +323,10 @@ public class CngUserSignature : IExternalSignature
                 return sig;
             }
         }
-        // 2. Neu la CNG KSP (dwProvType == 0)
+        // 3. Neu la CNG KSP khac (dwProvType == 0)
         else
         {
-            Console.WriteLine("[DEBUG] Khoa la CNG KSP. Dang mo CngKey bang Container Name (Silent)...");
+            Console.WriteLine("[DEBUG] Khoa la CNG KSP rieng. Dang mo CngKey bang Container Name (Silent)...");
             CngProvider cngProvider = new CngProvider(provInfo.pwszProvName);
             using (CngKey cngKey = CngKey.Open(provInfo.pwszContainerName, cngProvider, CngKeyOpenOptions.Silent)) // Silent de khong hien bat ky UI nao
             {

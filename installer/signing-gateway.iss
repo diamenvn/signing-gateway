@@ -62,15 +62,19 @@ Name: "{group}\Go cai dat";         Filename: "{uninstallexe}"
 
 [Run]
 ; Cai VNPT-CA Plugin truoc (neu co kem file). /VERYSILENT = cai ngam.
-; Chi chay neu file ton tai (Check: FileExists).
 Filename: "{tmp}\vnpt-ca-plugin-setup.exe"; Parameters: "/VERYSILENT /NORESTART"; \
-  StatusMsg: "Dang cai VNPT-CA Plugin..."; Check: PluginSetupExists; Flags: waituntilterminated
+  StatusMsg: "Dang cai VNPT-CA Plugin..."; Check: ShouldInstallPlugin; Flags: waituntilterminated
 
-; Gateway tu spawn cloudflared lam tien trinh con -> khong cai service rieng.
-Filename: "{app}\{#ExeName}"; \
+; Tu dong dang ky va khoi dong Gateway Service chay ngam
+Filename: "{app}\{#ExeName}"; Parameters: "--install"; \
   WorkingDir: "{commonappdata}\SigningGateway"; \
-  Description: "Khoi dong Signing Gateway ngay bay gio"; \
-  Flags: postinstall nowait skipifsilent
+  StatusMsg: "Dang thiet lap va khoi chay Gateway Service ngam..."; \
+  Flags: runhidden waituntilterminated
+
+[UninstallRun]
+Filename: "{app}\{#ExeName}"; Parameters: "--uninstall"; \
+  WorkingDir: "{app}"; \
+  Flags: runhidden waituntilterminated
 
 [UninstallDelete]
 Type: files; Name: "{commonstartup}\Signer Gateway.lnk"
@@ -88,6 +92,8 @@ var
   OptPage: TInputOptionWizardPage;
   BundledLicense: String;
   HasPluginSetup: Boolean;
+  SavedTenantId, SavedSecret, SavedOrigin, SavedLicense: String;
+  SavedTgToken, SavedTgChatId, SavedTunEnabled, SavedTunToken: String;
 
 // "https://his4-dev.vnpthis.vn/" -> "his4-dev.vnpthis.vn"
 // SDK cua VNPT gui window.location.hostname, KHONG kem scheme.
@@ -164,12 +170,92 @@ begin
     DirExists(ExpandConstant('{localappdata}\VNPT-CA Plugin'));
 end;
 
+function ShouldInstallPlugin(): Boolean;
+begin
+  Result := HasPluginSetup and (not CheckVnptPlugin());
+end;
+
+function GetJsonValueRaw(const FilePath, Key: String): String;
+var
+  Lines: TArrayOfString;
+  I, P: Integer;
+  Line, SearchKey: String;
+begin
+  Result := '';
+  if not FileExists(FilePath) then Exit;
+  if not LoadStringsFromFile(FilePath, Lines) then Exit;
+
+  SearchKey := '"' + Key + '"';
+  for I := 0 to GetArrayLength(Lines) - 1 do
+  begin
+    Line := Lines[I];
+    P := Pos(SearchKey, Line);
+    if P > 0 then
+    begin
+      P := Pos(':', Line);
+      if P > 0 then
+      begin
+        Result := Trim(Copy(Line, P + 1, Length(Line) - P));
+        if (Length(Result) > 0) and (Result[Length(Result)] = ',') then
+          Result := Copy(Result, 1, Length(Result) - 1);
+        if (Length(Result) > 0) and (Result[Length(Result)] = '}') then
+          Result := Copy(Result, 1, Length(Result) - 1);
+        Result := Trim(Result);
+        Exit;
+      end;
+    end;
+  end;
+end;
+
+function GetJsonString(const FilePath, Key: String): String;
+var
+  Val: String;
+begin
+  Val := GetJsonValueRaw(FilePath, Key);
+  if (Length(Val) >= 2) and (Val[1] = '"') and (Val[Length(Val)] = '"') then
+    Result := Copy(Val, 2, Length(Val) - 2)
+  else
+    Result := Val;
+end;
+
+function GetJsonOrigin(const FilePath: String): String;
+var
+  Val: String;
+  P1, P2: Integer;
+begin
+  Result := '';
+  Val := GetJsonValueRaw(FilePath, 'allowedOrigins');
+  P1 := Pos('"', Val);
+  if P1 > 0 then
+  begin
+    P2 := Pos('"', Copy(Val, P1 + 1, Length(Val) - P1));
+    if P2 > 0 then
+    begin
+      Result := Copy(Val, P1 + 1, P2 - 1);
+    end;
+  end;
+end;
+
 procedure InitializeWizard();
 var
-  Msg: String;
+  Msg, ExistingCfg: String;
 begin
   BundledLicense := ReadBundledLicense();
   HasPluginSetup := DetectPluginSetup();
+
+  // Doc lai thong tin tu file config.json cu neu co
+  ExistingCfg := ExpandConstant('{commonappdata}\SigningGateway\config.json');
+  if FileExists(ExistingCfg) then
+  begin
+    SavedTenantId := GetJsonString(ExistingCfg, 'tenantId');
+    SavedSecret := GetJsonString(ExistingCfg, 'hisSharedSecret');
+    SavedOrigin := GetJsonOrigin(ExistingCfg);
+    SavedLicense := GetJsonString(ExistingCfg, 'licenseKey');
+    SavedTgToken := GetJsonString(ExistingCfg, 'botToken');
+    SavedTgChatId := GetJsonString(ExistingCfg, 'chatId');
+    SavedTunEnabled := GetJsonValueRaw(ExistingCfg, 'enabled');
+    SavedTunToken := GetJsonString(ExistingCfg, 'token');
+  end;
 
   // Chi canh bao khi plugin CHUA cai VA bo cai KHONG kem file cai plugin.
   // Neu bo cai co kem plugin thi no se duoc cai o buoc [Run] -> khong canh bao.
@@ -194,7 +280,13 @@ begin
   CfgPage.Add('Ma benh vien (tenantId), vi du: bv-bach-mai:', False);
   CfgPage.Add('Secret dung chung voi backend HIS4 (64 ky tu hex):', False);
   CfgPage.Add('Origin cua HIS4:', False);
-  CfgPage.Values[2] := 'https://his4-dev.vnpthis.vn';
+
+  CfgPage.Values[0] := SavedTenantId;
+  CfgPage.Values[1] := SavedSecret;
+  if SavedOrigin <> '' then
+    CfgPage.Values[2] := SavedOrigin
+  else
+    CfgPage.Values[2] := 'https://his4-dev.vnpthis.vn';
 
   // License VNPT-CA Plugin. Khong co license, plugin tu choi moi lenh ky
   // voi loi: code -1, error "License not set for: <domain>"
@@ -204,7 +296,11 @@ begin
     'Chuoi license do VNPT cap, gan voi domain. Rat dai (hon 3000 ky tu) - ' +
     'dan nguyen, khong xuong dong.');
   LicPage.Add('License key:', False);
-  LicPage.Values[0] := BundledLicense;
+  
+  if SavedLicense <> '' then
+    LicPage.Values[0] := SavedLicense
+  else
+    LicPage.Values[0] := BundledLicense;
 
   // Quick tunnel KHONG can token. Phai hoi ro, khong suy dien tu o token.
   TunPage := CreateInputOptionPage(LicPage.ID,
@@ -215,7 +311,22 @@ begin
   TunPage.Add('Tunnel co dinh - CAN token (dung khi trien khai that)');
   TunPage.Add('Quick tunnel - KHONG can token, URL ngau nhien (chi de test)');
   TunPage.Add('Tat tunnel - tu cau hinh sau');
-  TunPage.SelectedValueIndex := 1;
+  
+  if SavedTunEnabled = 'true' then
+  begin
+    if SavedTunToken <> '' then
+      TunPage.SelectedValueIndex := 0
+    else
+      TunPage.SelectedValueIndex := 1;
+  end
+  else if SavedTunEnabled = 'false' then
+  begin
+    TunPage.SelectedValueIndex := 2;
+  end
+  else
+  begin
+    TunPage.SelectedValueIndex := 1;
+  end;
 
   TokPage := CreateInputQueryPage(TunPage.ID,
     'Cloudflare Tunnel token',
@@ -223,6 +334,7 @@ begin
     'Lay tai: Cloudflare Zero Trust > Networks > Tunnels > Create a tunnel. ' +
     'Token la chuoi dai bat dau bang eyJ...');
   TokPage.Add('Token:', False);
+  TokPage.Values[0] := SavedTunToken;
 
   // Trang Telegram: gui log/canh bao len Telegram (tuy chon)
   TgPage := CreateInputQueryPage(TokPage.ID,
@@ -232,6 +344,8 @@ begin
     'Lay chatId: nhan tin cho bot roi mo api.telegram.org/bot<token>/getUpdates');
   TgPage.Add('Bot Token:', False);
   TgPage.Add('Chat ID:', False);
+  TgPage.Values[0] := SavedTgToken;
+  TgPage.Values[1] := SavedTgChatId;
 
   // Trang tuy chon hien thi
   OptPage := CreateInputOptionPage(TgPage.ID,
