@@ -19,6 +19,8 @@
   "signTimeoutMs": 15000,
   "jobTtlMinutes": 30,
   "maxPdfBytes": 20971520,
+  "useNativeSigner": true,
+  "defaultPin": "",
 
   "tunnel": {
     "enabled": true,

@@ -182,7 +182,7 @@ const DEFAULTS = {
   },
   pluginProcessName: 'VNPT-CA Plugin.exe',
   pluginExePath: '',
-  useNativeSigner: false,
+  useNativeSigner: true,
   nativeSignerExePath: '',
   defaultPin: '',
 };
