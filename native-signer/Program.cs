@@ -409,23 +409,27 @@ class Program
             
             string[] fontCandidates = {
                 Path.Combine(fontsDir, "arial.ttf"),
+                Path.Combine(fontsDir, "Arial.ttf"),
+                Path.Combine(fontsDir, "ARIAL.TTF"),
                 Path.Combine(fontsDir, "times.ttf"),
+                Path.Combine(fontsDir, "Times.ttf"),
+                Path.Combine(fontsDir, "TIMES.TTF"),
                 Path.Combine(fontsDir, "tahoma.ttf"),
+                Path.Combine(fontsDir, "Tahoma.ttf"),
+                Path.Combine(fontsDir, "TAHOMA.TTF"),
                 Path.Combine(fontsDir, "calibri.ttf"),
+                Path.Combine(fontsDir, "Calibri.ttf"),
                 Path.Combine(fontsDir, "segoeui.ttf")
             };
 
             foreach (var path in fontCandidates)
             {
-                if (File.Exists(path))
+                try
                 {
-                    try
-                    {
-                        bf = BaseFont.CreateFont(path, BaseFont.IDENTITY_H, BaseFont.EMBEDDED);
-                        break;
-                    }
-                    catch {}
+                    bf = BaseFont.CreateFont(path, BaseFont.IDENTITY_H, BaseFont.EMBEDDED);
+                    if (bf != null) break;
                 }
+                catch {}
             }
 
             if (bf == null)
@@ -440,7 +444,7 @@ class Program
                             try
                             {
                                 bf = BaseFont.CreateFont(path, BaseFont.IDENTITY_H, BaseFont.EMBEDDED);
-                                break;
+                                if (bf != null) break;
                             }
                             catch {}
                         }
@@ -451,6 +455,7 @@ class Program
 
             if (bf == null)
             {
+                Console.WriteLine("[WARN] Khong load duoc font Unicode nao, quay lai Helvetica.");
                 bf = BaseFont.CreateFont(BaseFont.HELVETICA, BaseFont.CP1252, BaseFont.NOT_EMBEDDED);
             }
 
