@@ -27,9 +27,11 @@ class Program
         string image = null;
 
         bool listOnly = false;
+        bool testPkcs11 = false;
         for (int i = 0; i < args.Length; i++)
         {
             if (args[i] == "--list") listOnly = true;
+            else if (args[i] == "--test-pkcs11") testPkcs11 = true;
             else if (args[i] == "--input" && i + 1 < args.Length) input = args[++i];
             else if (args[i] == "--output" && i + 1 < args.Length) output = args[++i];
             else if (args[i] == "--serial" && i + 1 < args.Length) serial = args[++i];
@@ -95,6 +97,88 @@ class Program
             catch (Exception ex)
             {
                 Console.Error.WriteLine($"Error: {ex.Message}");
+                return 1;
+            }
+            return 0;
+        }
+
+        if (testPkcs11)
+        {
+            if (string.IsNullOrEmpty(serial) || string.IsNullOrEmpty(pin))
+            {
+                Console.Error.WriteLine("Loi: Thieu tham so cho --test-pkcs11 (--serial, --pin)");
+                return 1;
+            }
+
+            try
+            {
+                Console.WriteLine("[TEST] Khoi dong so sanh chu ky CNG va PKCS#11...");
+                X509Certificate2 cert = FindCertificate(serial);
+                if (cert == null)
+                {
+                    Console.Error.WriteLine($"Khong tim thay chung thu voi serial {serial}");
+                    return 1;
+                }
+
+                var signatureObj = new CngUserSignature(cert, pin, "SHA256");
+                var provInfo = signatureObj.GetKeyProvInfo();
+                if (provInfo == null || string.IsNullOrEmpty(provInfo.Value.pwszProvName))
+                {
+                    Console.Error.WriteLine("Khong doc duoc KeyProvInfo tu chung thu.");
+                    return 1;
+                }
+
+                string pkcs11DllPath = FindPkcs11Dll(provInfo.Value.pwszProvName);
+                if (pkcs11DllPath == null)
+                {
+                    Console.Error.WriteLine($"Khong tim thay DLL PKCS#11 phu hop cho Provider: {provInfo.Value.pwszProvName}");
+                    return 1;
+                }
+
+                Console.WriteLine($"[TEST] DLL PKCS#11 duoc su dung: {pkcs11DllPath}");
+
+                // Tao 32 bytes hash gia lap
+                byte[] testHash = new byte[32];
+                for (int idx = 0; idx < 32; idx++) testHash[idx] = (byte)idx;
+
+                // 1. Ky bang CNG (Gold Standard)
+                byte[] cngSig = null;
+                CngProvider cngProvider = new CngProvider(provInfo.Value.pwszProvName);
+                using (CngKey cngKey = CngKey.Open(provInfo.Value.pwszContainerName, cngProvider, CngKeyOpenOptions.None))
+                {
+                    byte[] pinBytes = Encoding.Unicode.GetBytes(pin + '\0');
+                    CngProperty pinProperty = new CngProperty("SmartCardPin", pinBytes, CngPropertyOptions.None);
+                    cngKey.SetProperty(pinProperty);
+                    using (var rsaCng = new RSACng(cngKey))
+                    {
+                        cngSig = rsaCng.SignHash(testHash, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+                    }
+                }
+                string cngSigHex = BitConverter.ToString(cngSig).Replace("-", "");
+                Console.WriteLine($"[TEST] CNG SignHash (GOC): {cngSigHex.Substring(0, 30)}... ({cngSig.Length} bytes)");
+
+                // 2. Chay test PKCS#11 voi 2 truong hop
+                var pkcs = new Pkcs11Signature(pkcs11DllPath, pin, "SHA256");
+                
+                // Truong hop A: Truyen Prefix + Hash
+                byte[] sigA = pkcs.SignTest(testHash, true); 
+                string hexA = BitConverter.ToString(sigA).Replace("-", "");
+                bool matchA = hexA == cngSigHex;
+                Console.WriteLine($"[TEST] PKCS11 (Prefix + Hash): {hexA.Substring(0, 30)}... Khop: {matchA}");
+
+                // Truong hop B: Truyen raw Hash
+                byte[] sigB = pkcs.SignTest(testHash, false);
+                string hexB = BitConverter.ToString(sigB).Replace("-", "");
+                bool matchB = hexB == cngSigHex;
+                Console.WriteLine($"[TEST] PKCS11 (Raw Hash): {hexB.Substring(0, 30)}... Khop: {matchB}");
+
+                if (matchA) Console.WriteLine("[TEST_RESULT] KET LUAN: Token yeu cau truyen day du Prefix + Hash (Case A).");
+                else if (matchB) Console.WriteLine("[TEST_RESULT] KET LUAN: Token tu dong them Prefix, chi can truyen Raw Hash (Case B).");
+                else Console.WriteLine("[TEST_RESULT] KET LUAN: Ca hai deu khong khop! Can kiem tra lai.");
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"[TEST] Loi test: {ex}");
                 return 1;
             }
             return 0;
@@ -1005,12 +1089,19 @@ public class Pkcs11Signature : IExternalSignature
                             if (hKey == IntPtr.Zero)
                                 throw new Exception("No private key object found on the token.");
 
+                            Console.WriteLine("[DEBUG] Pkcs11: Hashing message using SHA-256...");
+                            byte[] hashVal;
+                            using (var sha = SHA256.Create())
+                            {
+                                hashVal = sha.ComputeHash(message);
+                            }
+
                             Console.WriteLine("[DEBUG] Pkcs11: Formatting digest...");
                             // Formatted DigestInfo for SHA-256
                             byte[] prefix = { 0x30, 0x31, 0x30, 0x0d, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x01, 0x05, 0x00, 0x04, 0x20 };
-                            byte[] digestInfo = new byte[prefix.Length + message.Length];
+                            byte[] digestInfo = new byte[prefix.Length + hashVal.Length];
                             Buffer.BlockCopy(prefix, 0, digestInfo, 0, prefix.Length);
-                            Buffer.BlockCopy(message, 0, digestInfo, prefix.Length, message.Length);
+                            Buffer.BlockCopy(hashVal, 0, digestInfo, prefix.Length, hashVal.Length);
 
                             Console.WriteLine("[DEBUG] Pkcs11: Initializing sign mechanism...");
                             CK_MECHANISM mech = new CK_MECHANISM();
@@ -1046,6 +1137,184 @@ public class Pkcs11Signature : IExternalSignature
                     finally
                     {
                         Console.WriteLine("[DEBUG] Pkcs11: Closing session...");
+                        cCloseSession(hSession);
+                    }
+                }
+                finally
+                {
+                    Marshal.FreeHGlobal(pSlots);
+                }
+            }
+            finally
+            {
+                cFinalize(IntPtr.Zero);
+            }
+        }
+        finally
+        {
+            FreeLibrary(hModule);
+        }
+    }
+
+    public byte[] SignTest(byte[] hashVal, bool prependPrefix)
+    {
+        IntPtr hModule = LoadLibrary(_dllPath);
+        if (hModule == IntPtr.Zero)
+            throw new Exception($"Failed to load PKCS#11 DLL: {_dllPath}");
+
+        try
+        {
+            var cInitialize = GetFunc<C_Initialize>(hModule, "C_Initialize");
+            var cFinalize = GetFunc<C_Finalize>(hModule, "C_Finalize");
+            var cGetSlotList = GetFunc<C_GetSlotList>(hModule, "C_GetSlotList");
+            var cOpenSession = GetFunc<C_OpenSession>(hModule, "C_OpenSession");
+            var cCloseSession = GetFunc<C_CloseSession>(hModule, "C_CloseSession");
+            var cLogin = GetFunc<C_Login>(hModule, "C_Login");
+            var cLogout = GetFunc<C_Logout>(hModule, "C_Logout");
+            var cFindObjectsInit = GetFunc<C_FindObjectsInit>(hModule, "C_FindObjectsInit");
+            var cFindObjects = GetFunc<C_FindObjects>(hModule, "C_FindObjects");
+            var cFindObjectsFinal = GetFunc<C_FindObjectsFinal>(hModule, "C_FindObjectsFinal");
+            var cSignInit = GetFunc<C_SignInit>(hModule, "C_SignInit");
+            var cSign = GetFunc<C_Sign>(hModule, "C_Sign");
+
+            uint rv = cInitialize(IntPtr.Zero);
+            if (rv != 0 && rv != 0x00000191)
+                throw new Exception($"C_Initialize failed: 0x{rv:X8}");
+
+            try
+            {
+                uint count = 0;
+                rv = cGetSlotList(1, IntPtr.Zero, ref count);
+                if (rv != 0 || count == 0)
+                    throw new Exception("No active smart card slots found.");
+
+                IntPtr pSlots = Marshal.AllocHGlobal((int)count * 4);
+                try
+                {
+                    rv = cGetSlotList(1, pSlots, ref count);
+                    if (rv != 0)
+                        throw new Exception("C_GetSlotList failed.");
+
+                    int[] slots = new int[count];
+                    Marshal.Copy(pSlots, slots, 0, (int)count);
+                    uint slotId = (uint)slots[0];
+
+                    IntPtr hSession;
+                    rv = cOpenSession(slotId, CKF_SERIAL_SESSION, IntPtr.Zero, IntPtr.Zero, out hSession);
+                    if (rv != 0)
+                        throw new Exception($"C_OpenSession failed: 0x{rv:X8}");
+
+                    try
+                    {
+                        byte[] pinBytes = Encoding.ASCII.GetBytes(_pin);
+                        rv = cLogin(hSession, CKU_USER, pinBytes, (uint)pinBytes.Length);
+                        if (rv != 0)
+                            throw new Exception($"C_Login failed: 0x{rv:X8}");
+
+                        try
+                        {
+                            CK_ATTRIBUTE[] emptyTemplate = new CK_ATTRIBUTE[0];
+                            rv = cFindObjectsInit(hSession, emptyTemplate, 0);
+                            if (rv != 0)
+                                throw new Exception($"C_FindObjectsInit failed: 0x{rv:X8}");
+
+                            IntPtr hKey = IntPtr.Zero;
+                            try
+                            {
+                                IntPtr phObject = Marshal.AllocHGlobal(400);
+                                try
+                                {
+                                    uint objCount;
+                                    rv = cFindObjects(hSession, phObject, 100, out objCount);
+                                    if (rv != 0)
+                                        throw new Exception($"C_FindObjects failed: 0x{rv:X8}");
+
+                                    int[] handles = new int[objCount];
+                                    Marshal.Copy(phObject, handles, 0, (int)objCount);
+
+                                    var cGetAttributeValue = GetFunc<C_GetAttributeValue>(hModule, "C_GetAttributeValue");
+
+                                    for (int i = 0; i < objCount; i++)
+                                    {
+                                        IntPtr hObj = (IntPtr)handles[i];
+                                        IntPtr pClassVal = Marshal.AllocHGlobal(4);
+                                        try
+                                        {
+                                            CK_ATTRIBUTE[] attrClass = new CK_ATTRIBUTE[1];
+                                            attrClass[0].type = 0;
+                                            attrClass[0].pValue = pClassVal;
+                                            attrClass[0].ulValueLen = 4;
+
+                                            uint rvAttr = cGetAttributeValue(hSession, hObj, attrClass, 1);
+                                            if (rvAttr == 0)
+                                            {
+                                                uint classVal = (uint)Marshal.ReadInt32(pClassVal);
+                                                if (classVal == CKO_PRIVATE_KEY)
+                                                {
+                                                    hKey = hObj;
+                                                }
+                                            }
+                                        }
+                                        finally
+                                        {
+                                            Marshal.FreeHGlobal(pClassVal);
+                                        }
+                                    }
+                                }
+                                finally
+                                {
+                                    Marshal.FreeHGlobal(phObject);
+                                }
+                            }
+                            finally
+                            {
+                                cFindObjectsFinal(hSession);
+                            }
+
+                            if (hKey == IntPtr.Zero)
+                                throw new Exception("No private key object found on the token.");
+
+                            byte[] dataToSign;
+                            if (prependPrefix)
+                            {
+                                byte[] prefix = { 0x30, 0x31, 0x30, 0x0d, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x01, 0x05, 0x00, 0x04, 0x20 };
+                                dataToSign = new byte[prefix.Length + hashVal.Length];
+                                Buffer.BlockCopy(prefix, 0, dataToSign, 0, prefix.Length);
+                                Buffer.BlockCopy(hashVal, 0, dataToSign, prefix.Length, hashVal.Length);
+                            }
+                            else
+                            {
+                                dataToSign = hashVal;
+                            }
+
+                            CK_MECHANISM mech = new CK_MECHANISM();
+                            mech.mechanism = CKM_RSA_PKCS;
+                            mech.pParameter = IntPtr.Zero;
+                            mech.ulParameterLen = 0;
+
+                            rv = cSignInit(hSession, ref mech, hKey);
+                            if (rv != 0)
+                                throw new Exception($"C_SignInit failed: 0x{rv:X8}");
+
+                            uint sigLen = 0;
+                            rv = cSign(hSession, dataToSign, (uint)dataToSign.Length, null, ref sigLen);
+                            if (rv != 0 || sigLen == 0)
+                                throw new Exception($"C_Sign query length failed: 0x{rv:X8}");
+
+                            byte[] signature = new byte[sigLen];
+                            rv = cSign(hSession, dataToSign, (uint)dataToSign.Length, signature, ref sigLen);
+                            if (rv != 0)
+                                throw new Exception($"C_Sign failed: 0x{rv:X8}");
+
+                            return signature;
+                        }
+                        finally
+                        {
+                            cLogout(hSession);
+                        }
+                    }
+                    finally
+                    {
                         cCloseSession(hSession);
                     }
                 }
