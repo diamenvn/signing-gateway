@@ -101,6 +101,8 @@ var
   ResultCode: Integer;
 begin
   Result := True;
+  // Cuong buc dong moi instance signing-gateway.exe dang chay trong he thong
+  Exec('taskkill', '/F /IM signing-gateway.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   // Truoc khi cai dat, dung va xoa task cu de tranh loi file lock hoac khoi chay lai bat thuong
   Exec('schtasks', '/end /tn "SigningGateway"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   Exec('schtasks', '/delete /tn "SigningGateway" /f', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
@@ -466,7 +468,7 @@ begin
   else
     TgOn := 'false';
 
-  SetArrayLength(Lines, 31);
+  SetArrayLength(Lines, 33);
   Lines[0]  := '{';
   Lines[1]  := '  "host": "127.0.0.1",';
   Lines[2]  := '  "port": 8080,';
@@ -480,23 +482,25 @@ begin
   Lines[10] := '  "tsaUrl": "",';
   Lines[11] := '  "tsaUsername": "",';
   Lines[12] := '  "tsaPassword": "",';
-  Lines[13] := '  "signTimeoutMs": 120000,';
+  Lines[13] := '  "signTimeoutMs": 15000,';
   Lines[14] := '  "jobTtlMinutes": 30,';
   Lines[15] := '  "maxPdfBytes": 20971520,';
-  Lines[16] := '  "tunnel": {';
-  Lines[17] := '    "enabled": ' + TunnelOn + ',';
-  Lines[18] := '    "token": "' + TunnelTok + '",';
-  Lines[19] := '    "exePath": ""';
-  Lines[20] := '  },';
-  Lines[21] := '  "telegram": {';
-  Lines[22] := '    "enabled": ' + TgOn + ',';
-  Lines[23] := '    "botToken": "' + Trim(TgPage.Values[0]) + '",';
-  Lines[24] := '    "chatId": "' + Trim(TgPage.Values[1]) + '",';
-  Lines[25] := '    "minLevel": "warn",';
-  Lines[26] := '    "silent": false';
-  Lines[27] := '  }';
-  Lines[28] := '}';
-  Lines[29] := '';
+  Lines[16] := '  "useNativeSigner": true,';
+  Lines[17] := '  "defaultPin": "",';
+  Lines[18] := '  "tunnel": {';
+  Lines[19] := '    "enabled": ' + TunnelOn + ',';
+  Lines[20] := '    "token": "' + TunnelTok + '",';
+  Lines[21] := '    "exePath": ""';
+  Lines[22] := '  },';
+  Lines[23] := '  "telegram": {';
+  Lines[24] := '    "enabled": ' + TgOn + ',';
+  Lines[25] := '    "botToken": "' + Trim(TgPage.Values[0]) + '",';
+  Lines[26] := '    "chatId": "' + Trim(TgPage.Values[1]) + '",';
+  Lines[27] := '    "minLevel": "ok",';
+  Lines[28] := '    "sendLevels": ["ok", "warn", "error"]';
+  Lines[29] := '  }';
+  Lines[30] := '}';
+  Lines[31] := '';
 
   // SaveStringsToUTF8File ghi kem BOM (EF BB BF) -> JSON.parse crash.
   // Noi dung config toan ASCII nen SaveStringsToFile (khong BOM) la du.

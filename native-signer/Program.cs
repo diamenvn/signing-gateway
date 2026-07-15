@@ -26,9 +26,11 @@ class Program
         string desc = null;
         string image = null;
 
+        bool listOnly = false;
         for (int i = 0; i < args.Length; i++)
         {
-            if (args[i] == "--input" && i + 1 < args.Length) input = args[++i];
+            if (args[i] == "--list") listOnly = true;
+            else if (args[i] == "--input" && i + 1 < args.Length) input = args[++i];
             else if (args[i] == "--output" && i + 1 < args.Length) output = args[++i];
             else if (args[i] == "--serial" && i + 1 < args.Length) serial = args[++i];
             else if (args[i] == "--pin" && i + 1 < args.Length) pin = args[++i];
@@ -39,6 +41,34 @@ class Program
             else if (args[i] == "--ury" && i + 1 < args.Length) float.TryParse(args[++i], out ury);
             else if (args[i] == "--desc" && i + 1 < args.Length) desc = args[++i];
             else if (args[i] == "--image" && i + 1 < args.Length) image = args[++i];
+        }
+
+        if (listOnly)
+        {
+            try
+            {
+                X509Store store = new X509Store(StoreName.My, StoreLocation.CurrentUser);
+                store.Open(OpenFlags.ReadOnly);
+                try
+                {
+                    foreach (var cert in store.Certificates)
+                    {
+                        string serialNumber = cert.SerialNumber.Replace(" ", "").Replace(":", "").ToUpper();
+                        string cn = GetCertCN(cert);
+                        Console.WriteLine($"SERIAL:{serialNumber}|CN:{cn}|HAS_KEY:{cert.HasPrivateKey}");
+                    }
+                }
+                finally
+                {
+                    store.Close();
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"Error: {ex.Message}");
+                return 1;
+            }
+            return 0;
         }
 
         if (string.IsNullOrEmpty(input) || string.IsNullOrEmpty(output) || string.IsNullOrEmpty(serial))
@@ -366,10 +396,10 @@ public class CngUserSignature : IExternalSignature
         {
             Console.WriteLine("[DEBUG] Uu tien luong CSP cho khoa Type > 0...");
             
-            // A. Thu voi NoPrompt (Silent) + CryptSetProvParam truoc
+            // A. Thu voi NoPrompt (Silent) + KeyPassword + CryptSetProvParam truoc
             try
             {
-                Console.WriteLine("[DEBUG] Thu CSP voi NoPrompt + CryptSetProvParam (ASCII)...");
+                Console.WriteLine("[DEBUG] Thu CSP voi NoPrompt + KeyPassword + CryptSetProvParam (ASCII)...");
                 CspParameters cspParamsSilent = new CspParameters
                 {
                     ProviderName = provInfo.pwszProvName,
@@ -377,6 +407,16 @@ public class CngUserSignature : IExternalSignature
                     KeyContainerName = provInfo.pwszContainerName,
                     Flags = CspProviderFlags.UseExistingKey | CspProviderFlags.NoPrompt
                 };
+
+                if (!string.IsNullOrEmpty(_pin))
+                {
+                    SecureString securePin = new SecureString();
+                    foreach (char c in _pin)
+                    {
+                        securePin.AppendChar(c);
+                    }
+                    cspParamsSilent.KeyPassword = securePin;
+                }
 
                 using (var rsaCsp = new RSACryptoServiceProvider(cspParamsSilent))
                 {
@@ -391,9 +431,9 @@ public class CngUserSignature : IExternalSignature
             }
             catch (CryptographicException ex) when (ex.Message.Contains("silent") || ex.Message.Contains("0x80090022") || ex.Message.Contains("0x8009001A"))
             {
-                Console.WriteLine("[DEBUG] Ky CSP NoPrompt that bai (silent). Thu lai voi luong CSP tuong tac (khong NoPrompt) + CryptSetProvParam...");
+                Console.WriteLine("[DEBUG] Ky CSP NoPrompt that bai (silent). Thu lai voi luong CSP tuong tac (khong NoPrompt) + KeyPassword + CryptSetProvParam...");
                 
-                // B. Thu voi tuong tac (khong NoPrompt) + CryptSetProvParam
+                // B. Thu voi tuong tac (khong NoPrompt) + KeyPassword + CryptSetProvParam
                 // Neu PIN dung, driver se tu dong dung PIN va ky ngam ma khong hien bat ky UI nao
                 try
                 {
@@ -405,6 +445,16 @@ public class CngUserSignature : IExternalSignature
                         Flags = CspProviderFlags.UseExistingKey // KHONG dung NoPrompt
                     };
 
+                    if (!string.IsNullOrEmpty(_pin))
+                    {
+                        SecureString securePin = new SecureString();
+                        foreach (char c in _pin)
+                        {
+                            securePin.AppendChar(c);
+                        }
+                        cspParamsInteractive.KeyPassword = securePin;
+                    }
+
                     using (var rsaCsp = new RSACryptoServiceProvider(cspParamsInteractive))
                     {
                         if (!string.IsNullOrEmpty(_pin))
@@ -412,7 +462,7 @@ public class CngUserSignature : IExternalSignature
                             SetCspPin(rsaCsp, _pin, false);
                         }
                         byte[] sig = rsaCsp.SignData(message, new HashAlgorithmName(_hashAlgorithm), RSASignaturePadding.Pkcs1);
-                        Console.WriteLine("[DEBUG] Ky CSP Interactive + CryptSetProvParam (ASCII) thanh cong.");
+                        Console.WriteLine("[DEBUG] Ky CSP Interactive + KeyPassword + CryptSetProvParam (ASCII) thanh cong.");
                         return sig;
                     }
                 }

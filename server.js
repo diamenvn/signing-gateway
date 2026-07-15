@@ -766,19 +766,41 @@ class Plugin {
     this._tokenCacheAt = now;
     return r;
   }
-  getCertInfo() { return this.call(FN.GetCertInfo, ['1', this.cfg.certificateSerial || ''], 15000); }
+  async getCertInfo() {
+    if (this.cfg.useNativeSigner) {
+      try {
+        const { execFile } = require('node:child_process');
+        const exePath = path.join(BASE_DIR, 'bin', 'pdf-signer.exe');
+        const raw = await new Promise((resolve, reject) => {
+          execFile(exePath, ['--list'], { windowsHide: true }, (err, stdout, stderr) => {
+            if (err) reject(err);
+            else resolve(stdout);
+          });
+        });
+        
+        const certs = [];
+        const lines = raw.split('\n');
+        for (const line of lines) {
+          if (line.includes('SERIAL:')) {
+            const parts = line.split('|');
+            const serial = (parts.find(p => p.startsWith('SERIAL:')) || '').replace('SERIAL:', '').trim();
+            const cn = (parts.find(p => p.startsWith('CN:')) || '').replace('CN:', '').trim();
+            const hasKey = (parts.find(p => p.startsWith('HAS_KEY:')) || '').replace('HAS_KEY:', '').trim();
+            certs.push({ serial, cn, hasKey: hasKey === 'True' });
+          }
+        }
+        return JSON.stringify(certs);
+      } catch (e) {
+        log('error', `Loi khi getCertInfo tu native-signer: ${e.message}`);
+        return '[]';
+      }
+    }
+    return this.call(FN.GetCertInfo, ['1', this.cfg.certificateSerial || ''], 15000);
+  }
 
   /**
    * Liet ke serial cua cac cert dang co trong token (chuan hoa chu HOA).
-   * Cache 30s de khoi goi plugin lien tuc.
-   */
-  /**
-   * Liet ke serial cac cert trong token dang cam.
    * Cache NGAN (mac dinh 3s) va co the ep lam moi (force=true).
-   *
-   * QUAN TRONG (loi bao mat da sua): truoc day cache 30s. Khi rut USB cu
-   * cam USB moi, trong 30s cache van tra serial cu -> cho ky bang serial
-   * KHONG con trong may. Cache ngan + ep lam moi truoc khi ky khac phuc dieu nay.
    */
   async listSerials(force = false) {
     const now = Date.now();
@@ -786,15 +808,43 @@ class Plugin {
     if (!force && this._serialCache && now - this._serialCacheAt < ttl) {
       return this._serialCache;
     }
-    const raw = await this.call(FN.GetAllCertificates, [''], 15000);
+    
     let serials = [];
-    try {
-      const arr = JSON.parse(raw);
-      serials = arr.map((item) => {
-        const o = typeof item === 'string' ? JSON.parse(item) : item;
-        return String(o.serial || '').toUpperCase().replace(/\s+/g, '');
-      }).filter(Boolean);
-    } catch (_) { /* token khong co cert -> mang rong */ }
+    if (this.cfg.useNativeSigner) {
+      try {
+        const { execFile } = require('node:child_process');
+        const exePath = path.join(BASE_DIR, 'bin', 'pdf-signer.exe');
+        const raw = await new Promise((resolve, reject) => {
+          execFile(exePath, ['--list'], { windowsHide: true }, (err, stdout, stderr) => {
+            if (err) reject(err);
+            else resolve(stdout);
+          });
+        });
+        
+        const lines = raw.split('\n');
+        for (const line of lines) {
+          if (line.includes('SERIAL:')) {
+            const parts = line.split('|');
+            const serialPart = parts.find(p => p.startsWith('SERIAL:'));
+            if (serialPart) {
+              const s = serialPart.replace('SERIAL:', '').trim().toUpperCase().replace(/\s+/g, '');
+              if (s) serials.push(s);
+            }
+          }
+        }
+      } catch (e) {
+        log('error', `Loi khi listSerials tu native-signer: ${e.message}`);
+      }
+    } else {
+      const raw = await this.call(FN.GetAllCertificates, [''], 15000);
+      try {
+        const arr = JSON.parse(raw);
+        serials = arr.map((item) => {
+          const o = typeof item === 'string' ? JSON.parse(item) : item;
+          return String(o.serial || '').toUpperCase().replace(/\s+/g, '');
+        }).filter(Boolean);
+      } catch (_) {}
+    }
 
     this._serialCache = serials;
     this._serialCacheAt = now;
@@ -1510,13 +1560,9 @@ function forceRestartSmartCardService() {
   try {
     log('info', 'Dang tu dong khoi dong lai dich vu Smart Card (SCardSvr)...');
     try {
-      const pidBuf = execSync('powershell -Command "(Get-CimInstance Win32_Service -Filter \\"Name=\'SCardSvr\'\\").ProcessId"', { windowsHide: true });
-      const pid = parseInt(pidBuf.toString().trim(), 10);
-      if (pid > 0) {
-        execSync(`taskkill /F /PID ${pid}`, { stdio: 'ignore', windowsHide: true });
-      }
+      execSync('net stop SCardSvr', { stdio: 'ignore', windowsHide: true });
     } catch (e) {
-      log('warn', `Khong the taskkill SCardSvr: ${e.message}`);
+      log('warn', `Khong the stop SCardSvr: ${e.message}`);
     }
     execSync('net start SCardSvr', { stdio: 'ignore', windowsHide: true });
     log('info', 'Khoi dong lai dich vu SCardSvr thanh cong.');
