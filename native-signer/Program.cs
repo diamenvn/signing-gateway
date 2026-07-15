@@ -582,11 +582,12 @@ class Program
                                     {
                                         uint objCount;
                                         rv = cFindObjects(hSession, phObject, 100, out objCount);
+                                        Console.WriteLine($"[DEBUG] PKCS11 Check: cFindObjects found {objCount} certificate objects (rv=0x{rv:X8}).");
                                         if (rv == 0 && objCount > 0)
                                         {
                                             int[] handles = new int[objCount];
                                             Marshal.Copy(phObject, handles, 0, (int)objCount);
-
+ 
                                             for (int i = 0; i < objCount; i++)
                                             {
                                                 IntPtr hObj = (IntPtr)handles[i];
@@ -595,7 +596,7 @@ class Program
                                                 valAttr[0].type = 17; // CKA_VALUE = 17
                                                 valAttr[0].pValue = IntPtr.Zero;
                                                 valAttr[0].ulValueLen = 0;
-
+ 
                                                 uint rvSize = cGetAttributeValue(hSession, hObj, valAttr, 1);
                                                 if ((rvSize == 0 || rvSize == 0x00000150) && valAttr[0].ulValueLen > 0)
                                                 {
@@ -604,21 +605,32 @@ class Program
                                                     try
                                                     {
                                                         valAttr[0].pValue = pVal;
-                                                        if (cGetAttributeValue(hSession, hObj, valAttr, 1) == 0)
+                                                        uint rvVal = cGetAttributeValue(hSession, hObj, valAttr, 1);
+                                                        if (rvVal == 0)
                                                         {
                                                             byte[] certBytes = new byte[len];
                                                             Marshal.Copy(pVal, certBytes, 0, (int)len);
                                                             
-                                                            if (CompareBytes(certBytes, certRawData))
+                                                            bool isMatch = CompareBytes(certBytes, certRawData);
+                                                            Console.WriteLine($"[DEBUG] PKCS11 Check: Cert {i} length {certBytes.Length} vs expected {certRawData.Length}. Match={isMatch}");
+                                                            if (isMatch)
                                                             {
                                                                 return true;
                                                             }
+                                                        }
+                                                        else
+                                                        {
+                                                            Console.WriteLine($"[DEBUG] PKCS11 Check: cGetAttributeValue value read failed: rv=0x{rvVal:X8}");
                                                         }
                                                     }
                                                     finally
                                                     {
                                                         Marshal.FreeHGlobal(pVal);
                                                     }
+                                                }
+                                                else
+                                                {
+                                                    Console.WriteLine($"[DEBUG] PKCS11 Check: cGetAttributeValue size read failed: rv=0x{rvSize:X8}, len={valAttr[0].ulValueLen}");
                                                 }
                                             }
                                         }
