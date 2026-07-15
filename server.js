@@ -1183,6 +1183,12 @@ class Tunnel {
         this.retries = 0;
         console.log('');
         log('ok', `Tunnel san sang: https://${this.hostname}`);
+        
+        // Ghi URL ra file de tien tra cuu khi chay ngam
+        try {
+          fs.writeFileSync(path.join(BASE_DIR, 'tunnel_url.txt'), `https://${this.hostname}`);
+        } catch (_) {}
+
         log('warn', 'URL nay DOI moi lan khoi dong lai. Chi dung de test.');
         console.log('');
         return;
@@ -1214,6 +1220,9 @@ class Tunnel {
 
     this.proc.on('exit', (code) => {
       this.proc = null;
+      try {
+        fs.unlinkSync(path.join(BASE_DIR, 'tunnel_url.txt'));
+      } catch (_) {}
       if (this.stopping) { this.state = 'off'; return; }
 
       // Tunnel chet -> khoi dong lai, gian dan 5s, 10s, 20s... toi da 60s
@@ -1233,6 +1242,9 @@ class Tunnel {
       this.proc.kill();
       this.proc = null;
     }
+    try {
+      fs.unlinkSync(path.join(BASE_DIR, 'tunnel_url.txt'));
+    } catch (_) {}
     this.state = 'off';
   }
 }
@@ -2261,7 +2273,7 @@ async function main() {
     try {
       const exePath = process.execPath;
       console.log(`Installing task SigningGateway for: ${exePath}`);
-      execSync(`schtasks /create /tn "SigningGateway" /tr "\\"${exePath}\\"" /sc onstart /ru "SYSTEM" /rl highest /f`, { stdio: 'inherit' });
+      execSync(`schtasks /create /tn "SigningGateway" /tr "\\"${exePath}\\"" /sc onlogon /rl highest /f`, { stdio: 'inherit' });
       execSync(`schtasks /run /tn "SigningGateway"`, { stdio: 'inherit' });
       console.log('Installed and started SigningGateway service task successfully.');
       process.exit(0);
