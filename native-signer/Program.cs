@@ -371,7 +371,7 @@ public class CngUserSignature : IExternalSignature
         return "RSA";
     }
 
-    private CRYPT_KEY_PROV_INFO? GetKeyProvInfo()
+    public CRYPT_KEY_PROV_INFO? GetKeyProvInfo()
     {
         int pcbData = 0;
         if (!CertGetCertificateContextProperty(_cert.Handle, CERT_KEY_PROV_INFO_PROP_ID, IntPtr.Zero, ref pcbData))
