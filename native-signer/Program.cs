@@ -365,52 +365,61 @@ public class CngUserSignature : IExternalSignature
         if (provInfo.dwProvType > 0)
         {
             Console.WriteLine("[DEBUG] Uu tien luong CSP cho khoa Type > 0...");
-            CspParameters cspParams = new CspParameters
+            
+            // A. Thu voi NoPrompt (Silent) + CryptSetProvParam truoc
+            try
             {
-                ProviderName = provInfo.pwszProvName,
-                ProviderType = (int)provInfo.dwProvType,
-                KeyContainerName = provInfo.pwszContainerName,
-                Flags = CspProviderFlags.UseExistingKey | CspProviderFlags.NoPrompt
-            };
-
-            using (var rsaCsp = new RSACryptoServiceProvider(cspParams))
-            {
-                if (!string.IsNullOrEmpty(_pin))
+                Console.WriteLine("[DEBUG] Thu CSP voi NoPrompt + CryptSetProvParam (ASCII)...");
+                CspParameters cspParamsSilent = new CspParameters
                 {
-                    // A. Thu ky voi PIN dang ASCII truoc
-                    try
+                    ProviderName = provInfo.pwszProvName,
+                    ProviderType = (int)provInfo.dwProvType,
+                    KeyContainerName = provInfo.pwszContainerName,
+                    Flags = CspProviderFlags.UseExistingKey | CspProviderFlags.NoPrompt
+                };
+
+                using (var rsaCsp = new RSACryptoServiceProvider(cspParamsSilent))
+                {
+                    if (!string.IsNullOrEmpty(_pin))
                     {
-                        Console.WriteLine("[DEBUG] Thiet lap PIN qua CryptSetProvParam (ASCII)...");
                         SetCspPin(rsaCsp, _pin, false);
-                        Console.WriteLine("[DEBUG] Dang ky bang RSACryptoServiceProvider (ASCII)...");
+                    }
+                    byte[] sig = rsaCsp.SignData(message, new HashAlgorithmName(_hashAlgorithm), RSASignaturePadding.Pkcs1);
+                    Console.WriteLine("[DEBUG] Ky CSP NoPrompt (ASCII) thanh cong.");
+                    return sig;
+                }
+            }
+            catch (CryptographicException ex) when (ex.Message.Contains("silent") || ex.Message.Contains("0x80090022") || ex.Message.Contains("0x8009001A"))
+            {
+                Console.WriteLine("[DEBUG] Ky CSP NoPrompt that bai (silent). Thu lai voi luong CSP tuong tac (khong NoPrompt) + CryptSetProvParam...");
+                
+                // B. Thu voi tuong tac (khong NoPrompt) + CryptSetProvParam
+                // Neu PIN dung, driver se tu dong dung PIN va ky ngam ma khong hien bat ky UI nao
+                try
+                {
+                    CspParameters cspParamsInteractive = new CspParameters
+                    {
+                        ProviderName = provInfo.pwszProvName,
+                        ProviderType = (int)provInfo.dwProvType,
+                        KeyContainerName = provInfo.pwszContainerName,
+                        Flags = CspProviderFlags.UseExistingKey // KHONG dung NoPrompt
+                    };
+
+                    using (var rsaCsp = new RSACryptoServiceProvider(cspParamsInteractive))
+                    {
+                        if (!string.IsNullOrEmpty(_pin))
+                        {
+                            SetCspPin(rsaCsp, _pin, false);
+                        }
                         byte[] sig = rsaCsp.SignData(message, new HashAlgorithmName(_hashAlgorithm), RSASignaturePadding.Pkcs1);
-                        Console.WriteLine("[DEBUG] Ky bang RSACryptoServiceProvider (ASCII) thanh cong.");
+                        Console.WriteLine("[DEBUG] Ky CSP Interactive + CryptSetProvParam (ASCII) thanh cong.");
                         return sig;
                     }
-                    catch (CryptographicException ex) when (ex.Message.Contains("silent") || ex.Message.Contains("0x80090022") || ex.Message.Contains("0x8009001A"))
-                    {
-                        Console.WriteLine("[DEBUG] Ky voi PIN ASCII that bai (silent). Thu lai voi PIN dang Unicode...");
-                        try
-                        {
-                            SetCspPin(rsaCsp, _pin, true);
-                            Console.WriteLine("[DEBUG] Dang ky bang RSACryptoServiceProvider (Unicode)...");
-                            byte[] sig = rsaCsp.SignData(message, new HashAlgorithmName(_hashAlgorithm), RSASignaturePadding.Pkcs1);
-                            Console.WriteLine("[DEBUG] Ky bang RSACryptoServiceProvider (Unicode) thanh cong.");
-                            return sig;
-                        }
-                        catch (Exception innerEx)
-                        {
-                            Console.WriteLine($"[DEBUG] Thu PIN Unicode loi: {innerEx.Message}");
-                            throw;
-                        }
-                    }
                 }
-                else
+                catch (Exception innerEx)
                 {
-                    Console.WriteLine("[DEBUG] Dang ky bang RSACryptoServiceProvider (Khong PIN)...");
-                    byte[] sig = rsaCsp.SignData(message, new HashAlgorithmName(_hashAlgorithm), RSASignaturePadding.Pkcs1);
-                    Console.WriteLine("[DEBUG] Ky bang RSACryptoServiceProvider thanh cong.");
-                    return sig;
+                    Console.WriteLine($"[DEBUG] Thu CSP Interactive loi: {innerEx.Message}");
+                    throw;
                 }
             }
         }
