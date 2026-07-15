@@ -120,20 +120,21 @@ class Program
                     return 1;
                 }
 
+                string pkcs11DllPath = FindCompatiblePkcs11Dll(cert);
+                if (pkcs11DllPath == null)
+                {
+                    Console.Error.WriteLine("Khong tim thay DLL PKCS#11 phu hop cho chung thu nay.");
+                    return 1;
+                }
+
                 var signatureObj = new CngUserSignature(cert, pin, "SHA256");
-                var provInfo = signatureObj.GetKeyProvInfo();
-                if (provInfo == null || string.IsNullOrEmpty(provInfo.Value.pwszProvName))
+                var provInfoOpt = signatureObj.GetKeyProvInfo();
+                if (provInfoOpt == null)
                 {
                     Console.Error.WriteLine("Khong doc duoc KeyProvInfo tu chung thu.");
                     return 1;
                 }
-
-                string pkcs11DllPath = FindPkcs11Dll(provInfo.Value.pwszProvName);
-                if (pkcs11DllPath == null)
-                {
-                    Console.Error.WriteLine($"Khong tim thay DLL PKCS#11 phu hop cho Provider: {provInfo.Value.pwszProvName}");
-                    return 1;
-                }
+                var provInfo = provInfoOpt.Value;
 
                 Console.WriteLine($"[TEST] DLL PKCS#11 duoc su dung: {pkcs11DllPath}");
 
@@ -280,13 +281,7 @@ class Program
 
         // 2. Khoi tao doi tuong ky ngoai (IExternalSignature) ho tro PKCS#11, CNG va CSP
         IExternalSignature externalSignature;
-        string pkcs11DllPath = null;
-        var signatureObj = new CngUserSignature(cert, pin, "SHA256");
-        var provInfo = signatureObj.GetKeyProvInfo();
-        if (provInfo != null && !string.IsNullOrEmpty(provInfo.Value.pwszProvName))
-        {
-            pkcs11DllPath = FindPkcs11Dll(provInfo.Value.pwszProvName);
-        }
+        string pkcs11DllPath = FindCompatiblePkcs11Dll(cert);
 
         if (pkcs11DllPath != null)
         {
@@ -296,7 +291,7 @@ class Program
         else
         {
             Console.WriteLine("[INFO] Su dung luong ky mac dinh CAPI/CNG...");
-            externalSignature = signatureObj;
+            externalSignature = new CngUserSignature(cert, pin, "SHA256");
         }
 
         // 3. Mo va tao chu ky PDF
@@ -354,30 +349,237 @@ class Program
         return cert.FriendlyName ?? subject;
     }
 
-    static string FindPkcs11Dll(string providerName)
+    static string FindCompatiblePkcs11Dll(X509Certificate2 cert)
     {
-        string pattern = null;
-        if (providerName.Contains("ICA")) pattern = "ica_csp11_v1";
-        else if (providerName.Contains("NC-CA")) pattern = "ncca_csp11_v1";
-        else return null;
-
+        List<string> candidateDlls = new List<string>();
         string[] searchDirs = { 
             Environment.GetFolderPath(Environment.SpecialFolder.System),
             Environment.GetFolderPath(Environment.SpecialFolder.SystemX86)
         };
-
+        string[] patterns = { "*csp11*.dll", "*pkcs11*.dll", "*entersafe*.dll" };
         foreach (var dir in searchDirs)
         {
             if (Directory.Exists(dir))
             {
-                // Chỉ load bản DLL thường vì kết quả quét PE xuất khẩu cho thấy
-                // chỉ bản thường mới hỗ trợ chuẩn PKCS#11 (chứa các hàm C_...),
-                // còn bản _s.dll chỉ là driver CSP thuần.
-                string normalPath = Path.Combine(dir, pattern + ".dll");
-                if (File.Exists(normalPath)) return normalPath;
+                foreach (var pattern in patterns)
+                {
+                    try
+                    {
+                        var files = Directory.GetFiles(dir, pattern);
+                        foreach (var f in files)
+                        {
+                            if (!f.EndsWith("_s.dll", StringComparison.OrdinalIgnoreCase) && !candidateDlls.Contains(f))
+                            {
+                                candidateDlls.Add(f);
+                            }
+                        }
+                    }
+                    catch {}
+                }
             }
         }
+
+        byte[] certRawData = cert.RawData;
+        foreach (var dll in candidateDlls)
+        {
+            try
+            {
+                if (CheckIfDllContainsCert(dll, certRawData))
+                {
+                    return dll;
+                }
+            }
+            catch {}
+        }
         return null;
+    }
+
+    static bool CheckIfDllContainsCert(string dllPath, byte[] certRawData)
+    {
+        IntPtr hModule = LoadLibrary(dllPath);
+        if (hModule == IntPtr.Zero) return false;
+
+        try
+        {
+            var cInitialize = GetFuncLocal<C_Initialize>(hModule, "C_Initialize");
+            var cFinalize = GetFuncLocal<C_Finalize>(hModule, "C_Finalize");
+            var cGetSlotList = GetFuncLocal<C_GetSlotList>(hModule, "C_GetSlotList");
+            var cOpenSession = GetFuncLocal<C_OpenSession>(hModule, "C_OpenSession");
+            var cCloseSession = GetFuncLocal<C_CloseSession>(hModule, "C_CloseSession");
+            var cFindObjectsInit = GetFuncLocal<C_FindObjectsInit>(hModule, "C_FindObjectsInit");
+            var cFindObjects = GetFuncLocal<C_FindObjects>(hModule, "C_FindObjects");
+            var cFindObjectsFinal = GetFuncLocal<C_FindObjectsFinal>(hModule, "C_FindObjectsFinal");
+            var cGetAttributeValue = GetFuncLocal<C_GetAttributeValue>(hModule, "C_GetAttributeValue");
+
+            if (cInitialize == null || cFinalize == null || cGetSlotList == null || cOpenSession == null || 
+                cCloseSession == null || cFindObjectsInit == null || cFindObjects == null || 
+                cFindObjectsFinal == null || cGetAttributeValue == null)
+            {
+                return false;
+            }
+
+            uint rv = cInitialize(IntPtr.Zero);
+            if (rv != 0 && rv != 0x00000191) return false;
+
+            try
+            {
+                uint count = 0;
+                rv = cGetSlotList(1, IntPtr.Zero, ref count);
+                if (rv != 0 || count == 0) return false;
+
+                IntPtr pSlots = Marshal.AllocHGlobal((int)count * 4);
+                try
+                {
+                    rv = cGetSlotList(1, pSlots, ref count);
+                    if (rv != 0) return false;
+
+                    int[] slots = new int[count];
+                    Marshal.Copy(pSlots, slots, 0, (int)count);
+
+                    foreach (int slotId in slots)
+                    {
+                        IntPtr hSession;
+                        rv = cOpenSession((uint)slotId, CKF_SERIAL_SESSION, IntPtr.Zero, IntPtr.Zero, out hSession);
+                        if (rv != 0) continue;
+
+                        try
+                        {
+                            IntPtr pClass = Marshal.AllocHGlobal(4);
+                            Marshal.WriteInt32(pClass, 1); // CKO_CERTIFICATE = 1
+                            try
+                            {
+                                CK_ATTRIBUTE[] template = new CK_ATTRIBUTE[1];
+                                template[0].type = 0; // CKA_CLASS = 0
+                                template[0].pValue = pClass;
+                                template[0].ulValueLen = 4;
+
+                                rv = cFindObjectsInit(hSession, template, 1);
+                                if (rv != 0) continue;
+
+                                try
+                                {
+                                    IntPtr phObject = Marshal.AllocHGlobal(400);
+                                    try
+                                    {
+                                        uint objCount;
+                                        rv = cFindObjects(hSession, phObject, 100, out objCount);
+                                        if (rv == 0 && objCount > 0)
+                                        {
+                                            int[] handles = new int[objCount];
+                                            Marshal.Copy(phObject, handles, 0, (int)objCount);
+
+                                            for (int i = 0; i < objCount; i++)
+                                            {
+                                                IntPtr hObj = (IntPtr)handles[i];
+                                                
+                                                CK_ATTRIBUTE[] valAttr = new CK_ATTRIBUTE[1];
+                                                valAttr[0].type = 17; // CKA_VALUE = 17
+                                                valAttr[0].pValue = IntPtr.Zero;
+                                                valAttr[0].ulValueLen = 0;
+
+                                                uint rvSize = cGetAttributeValue(hSession, hObj, valAttr, 1);
+                                                if ((rvSize == 0 || rvSize == 0x00000150) && valAttr[0].ulValueLen > 0)
+                                                {
+                                                    uint len = valAttr[0].ulValueLen;
+                                                    IntPtr pVal = Marshal.AllocHGlobal((int)len);
+                                                    try
+                                                    {
+                                                        valAttr[0].pValue = pVal;
+                                                        if (cGetAttributeValue(hSession, hObj, valAttr, 1) == 0)
+                                                        {
+                                                            byte[] certBytes = new byte[len];
+                                                            Marshal.Copy(pVal, certBytes, 0, (int)len);
+                                                            
+                                                            if (CompareBytes(certBytes, certRawData))
+                                                            {
+                                                                return true;
+                                                            }
+                                                        }
+                                                    }
+                                                    finally
+                                                    {
+                                                        Marshal.FreeHGlobal(pVal);
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                    finally
+                                    {
+                                        Marshal.FreeHGlobal(phObject);
+                                    }
+                                }
+                                finally
+                                {
+                                    cFindObjectsFinal(hSession);
+                                }
+                            }
+                            finally
+                            {
+                                Marshal.FreeHGlobal(pClass);
+                            }
+                        }
+                        finally
+                        {
+                            cCloseSession(hSession);
+                        }
+                    }
+                }
+                finally
+                {
+                    Marshal.FreeHGlobal(pSlots);
+                }
+            }
+            finally
+            {
+                cFinalize(IntPtr.Zero);
+            }
+        }
+        catch {}
+        finally
+        {
+            FreeLibrary(hModule);
+        }
+        return false;
+    }
+
+    static bool CompareBytes(byte[] a, byte[] b)
+    {
+        if (a.Length != b.Length) return false;
+        for (int i = 0; i < a.Length; i++)
+        {
+            if (a[i] != b[i]) return false;
+        }
+        return true;
+    }
+
+    static T GetFuncLocal<T>(IntPtr hModule, string name) where T : Delegate
+    {
+        IntPtr proc = GetProcAddress(hModule, name);
+        if (proc == IntPtr.Zero)
+        {
+            int size = 0;
+            switch (name)
+            {
+                case "C_Initialize": size = 4; break;
+                case "C_Finalize": size = 4; break;
+                case "C_CloseSession": size = 4; break;
+                case "C_GetSlotList": size = 12; break;
+                case "C_FindObjectsInit": size = 12; break;
+                case "C_FindObjects": size = 16; break;
+                case "C_OpenSession": size = 20; break;
+                case "C_GetAttributeValue": size = 16; break;
+                case "C_FindObjectsFinal": size = 4; break;
+            }
+            if (size > 0)
+            {
+                proc = GetProcAddress(hModule, $"_{name}@{size}");
+                if (proc == IntPtr.Zero)
+                    proc = GetProcAddress(hModule, $"{name}@{size}");
+            }
+        }
+        if (proc == IntPtr.Zero) return null;
+        return Marshal.GetDelegateForFunctionPointer<T>(proc);
     }
 
     static void DumpDllExports(string dllPath)
