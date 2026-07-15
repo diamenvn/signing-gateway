@@ -205,14 +205,70 @@ public class CngUserSignature : IExternalSignature
     public byte[] Sign(byte[] message)
     {
         Console.WriteLine("[DEBUG] Bat dau phuong thuc Sign...");
+        
+        // 1. Thu dung CAPI (PrivateKey) truoc de tranh treo tren cac USB Driver cu
+        try
+        {
+            Console.WriteLine("[DEBUG] Dang thu lay khoa bang _cert.PrivateKey...");
+#pragma warning disable 618 // Tat canh bao Obsolete trong .NET Core
+            var privateKey = _cert.PrivateKey;
+#pragma warning restore 618
+            if (privateKey != null)
+            {
+                Console.WriteLine("[DEBUG] Lay _cert.PrivateKey thanh cong. Loai: " + privateKey.GetType().FullName);
+                if (privateKey is RSACryptoServiceProvider rsaCsp)
+                {
+                    if (!string.IsNullOrEmpty(_pin))
+                    {
+                        Console.WriteLine("[DEBUG] Khoa la RSACryptoServiceProvider. Dang build CSP params voi PIN...");
+                        var container = rsaCsp.CspKeyContainerInfo;
+                        CspParameters cspParams = new CspParameters
+                        {
+                            ProviderName = container.ProviderName,
+                            ProviderType = container.ProviderType,
+                            KeyContainerName = container.KeyContainerName,
+                            Flags = CspProviderFlags.UseExistingKey
+                        };
+                        if (container.MachineKeyStore)
+                            cspParams.Flags |= CspProviderFlags.UseMachineKeyStore;
+                        
+                        SecureString securePin = new SecureString();
+                        foreach (char c in _pin) securePin.AppendChar(c);
+                        cspParams.KeyPassword = securePin;
+                        
+                        using (var rsaCspWithPin = new RSACryptoServiceProvider(cspParams))
+                        {
+                            Console.WriteLine("[DEBUG] Dang goi rsaCspWithPin.SignData...");
+                            byte[] sig = rsaCspWithPin.SignData(message, new HashAlgorithmName(_hashAlgorithm), RSASignaturePadding.Pkcs1);
+                            Console.WriteLine("[DEBUG] rsaCspWithPin.SignData thanh cong.");
+                            return sig;
+                        }
+                    }
+                    else
+                    {
+                        Console.WriteLine("[DEBUG] Dang goi rsaCsp.SignData (mac dinh)...");
+                        byte[] sig = rsaCsp.SignData(message, new HashAlgorithmName(_hashAlgorithm), RSASignaturePadding.Pkcs1);
+                        Console.WriteLine("[DEBUG] rsaCsp.SignData (mac dinh) thanh cong.");
+                        return sig;
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine("[DEBUG] (Bo qua) Gap loi khi thu ky bang _cert.PrivateKey: " + ex.Message);
+        }
+
+        // 2. Neu CAPI that bai hoac khong ho tro, fallback sang CNG
+        Console.WriteLine("[DEBUG] Fallback: Dang thu lay khoa bang _cert.GetRSAPrivateKey()...");
         using (RSA rsa = _cert.GetRSAPrivateKey())
         {
             if (rsa == null)
                 throw new Exception("Chung thu khong chua khoa bi mat RSA hop le.");
 
-            Console.WriteLine("[DEBUG] Loai doi tuong RSA nhan duoc: " + rsa.GetType().FullName);
+            Console.WriteLine("[DEBUG] Loai doi tuong RSA nhan duoc tu GetRSAPrivateKey: " + rsa.GetType().FullName);
 
-            // 1. Thiet lap PIN cho khoa dang CNG (Key Storage Provider)
+            // Thiet lap PIN cho khoa dang CNG (Key Storage Provider)
             if (rsa is RSACng rsaCng && !string.IsNullOrEmpty(_pin))
             {
                 Console.WriteLine("[DEBUG] Khoa la RSACng. Dang set SmartCardPin...");
@@ -221,41 +277,10 @@ public class CngUserSignature : IExternalSignature
                 rsaCng.Key.SetProperty(pinProperty);
                 Console.WriteLine("[DEBUG] Set SmartCardPin xong.");
             }
-            // 2. Thiet lap PIN cho khoa dang CSP cu (Cryptographic Service Provider)
-            else if (rsa is RSACryptoServiceProvider rsaCsp && !string.IsNullOrEmpty(_pin))
-            {
-                Console.WriteLine("[DEBUG] Khoa la RSACryptoServiceProvider. Dang build CSP params voi PIN...");
-                var container = rsaCsp.CspKeyContainerInfo;
-                CspParameters cspParams = new CspParameters
-                {
-                    ProviderName = container.ProviderName,
-                    ProviderType = container.ProviderType,
-                    KeyContainerName = container.KeyContainerName,
-                    Flags = CspProviderFlags.UseExistingKey
-                };
-                if (container.MachineKeyStore)
-                    cspParams.Flags |= CspProviderFlags.UseMachineKeyStore;
-                
-                SecureString securePin = new SecureString();
-                foreach (char c in _pin) securePin.AppendChar(c);
-                cspParams.KeyPassword = securePin;
-                
-                using (var rsaCspWithPin = new RSACryptoServiceProvider(cspParams))
-                {
-                    Console.WriteLine("[DEBUG] Dang goi rsaCspWithPin.SignData...");
-                    byte[] sig = rsaCspWithPin.SignData(message, new HashAlgorithmName(_hashAlgorithm), RSASignaturePadding.Pkcs1);
-                    Console.WriteLine("[DEBUG] rsaCspWithPin.SignData thanh cong.");
-                    return sig;
-                }
-            }
-            else
-            {
-                Console.WriteLine("[DEBUG] Khong set duoc PIN (hoac rsa khong phai CNG/CSP, hoac PIN rong).");
-            }
 
-            Console.WriteLine("[DEBUG] Dang goi rsa.SignData (mac dinh)...");
+            Console.WriteLine("[DEBUG] Dang goi rsa.SignData...");
             byte[] signature = rsa.SignData(message, new HashAlgorithmName(_hashAlgorithm), RSASignaturePadding.Pkcs1);
-            Console.WriteLine("[DEBUG] rsa.SignData (mac dinh) thanh cong.");
+            Console.WriteLine("[DEBUG] rsa.SignData thanh cong.");
             return signature;
         }
     }
