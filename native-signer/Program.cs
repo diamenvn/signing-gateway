@@ -442,264 +442,35 @@ class Program
 
     static string FindCompatiblePkcs11Dll(X509Certificate2 cert, string pin)
     {
-        List<string> candidateDlls = new List<string>();
-        string[] searchDirs = { 
-            Environment.GetFolderPath(Environment.SpecialFolder.System),
-            Environment.GetFolderPath(Environment.SpecialFolder.SystemX86)
-        };
-        string[] patterns = { "*csp11*.dll", "*pkcs11*.dll", "*entersafe*.dll" };
-        foreach (var dir in searchDirs)
-        {
-            if (Directory.Exists(dir))
-            {
-                foreach (var pattern in patterns)
-                {
-                    try
-                    {
-                        var files = Directory.GetFiles(dir, pattern);
-                        foreach (var f in files)
-                        {
-                            if (!f.EndsWith("_s.dll", StringComparison.OrdinalIgnoreCase) && !candidateDlls.Contains(f))
-                            {
-                                candidateDlls.Add(f);
-                            }
-                        }
-                    }
-                    catch {}
-                }
-            }
-        }
-
-        byte[] certRawData = cert.RawData;
-        Console.WriteLine($"[DEBUG] PKCS11: Tim DLL tuong thich cho serial. Tim thay {candidateDlls.Count} file DLL ung vien...");
-        foreach (var dll in candidateDlls)
-        {
-            try
-            {
-                if (CheckIfDllContainsCert(dll, certRawData, pin))
-                {
-                    Console.WriteLine($"[DEBUG] PKCS11: Tim thay DLL khop! -> {dll}");
-                    return dll;
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"[DEBUG] PKCS11: Loi khi check DLL {dll}: {ex.Message}");
-            }
-        }
-        Console.WriteLine("[DEBUG] PKCS11: Khong tim thay DLL PKCS#11 nao chua certificate nay.");
-        return null;
-    }
-
-    static bool CheckIfDllContainsCert(string dllPath, byte[] certRawData, string pin)
-    {
-        Console.WriteLine($"[DEBUG] PKCS11 Check: Loading {dllPath}...");
-        IntPtr hModule = Win32.LoadLibrary(dllPath);
-        if (hModule == IntPtr.Zero)
-        {
-            Console.WriteLine($"[DEBUG] PKCS11 Check: LoadLibrary {dllPath} failed.");
-            return false;
-        }
-
         try
         {
-            var cInitialize = GetFuncLocal<C_Initialize>(hModule, "C_Initialize");
-            var cFinalize = GetFuncLocal<C_Finalize>(hModule, "C_Finalize");
-            var cGetSlotList = GetFuncLocal<C_GetSlotList>(hModule, "C_GetSlotList");
-            var cOpenSession = GetFuncLocal<C_OpenSession>(hModule, "C_OpenSession");
-            var cCloseSession = GetFuncLocal<C_CloseSession>(hModule, "C_CloseSession");
-            var cFindObjectsInit = GetFuncLocal<C_FindObjectsInit>(hModule, "C_FindObjectsInit");
-            var cFindObjects = GetFuncLocal<C_FindObjects>(hModule, "C_FindObjects");
-            var cFindObjectsFinal = GetFuncLocal<C_FindObjectsFinal>(hModule, "C_FindObjectsFinal");
-            var cGetAttributeValue = GetFuncLocal<C_GetAttributeValue>(hModule, "C_GetAttributeValue");
-            var cLogin = GetFuncLocal<C_Login>(hModule, "C_Login");
-            var cLogout = GetFuncLocal<C_Logout>(hModule, "C_Logout");
-
-            if (cInitialize == null || cFinalize == null || cGetSlotList == null || cOpenSession == null || 
-                cCloseSession == null || cFindObjectsInit == null || cFindObjects == null || 
-                cFindObjectsFinal == null || cGetAttributeValue == null || cLogin == null || cLogout == null)
+            var tempSigObj = new CngUserSignature(cert, pin, "SHA256");
+            var provInfoOpt = tempSigObj.GetKeyProvInfo();
+            if (provInfoOpt != null && !string.IsNullOrEmpty(provInfoOpt.Value.pwszProvName))
             {
-                Console.WriteLine($"[DEBUG] PKCS11 Check: DLL {dllPath} thieu ham PKCS11.");
-                return false;
-            }
+                string providerName = provInfoOpt.Value.pwszProvName;
+                string pattern = null;
+                if (providerName.Contains("ICA")) pattern = "ica_csp11_v1";
+                else if (providerName.Contains("NC-CA")) pattern = "ncca_csp11_v1";
+                else return null;
 
-            uint rv = cInitialize(IntPtr.Zero);
-            if (rv != 0 && rv != 0x00000191)
-            {
-                Console.WriteLine($"[DEBUG] PKCS11 Check: C_Initialize failed with code 0x{rv:X8}");
-                return false;
-            }
+                string[] searchDirs = { 
+                    Environment.GetFolderPath(Environment.SpecialFolder.System),
+                    Environment.GetFolderPath(Environment.SpecialFolder.SystemX86)
+                };
 
-            try
-            {
-                uint count = 0;
-                rv = cGetSlotList(1, IntPtr.Zero, ref count);
-                if (rv != 0 || count == 0)
+                foreach (var dir in searchDirs)
                 {
-                    Console.WriteLine($"[DEBUG] PKCS11 Check: cGetSlotList failed or count=0: rv=0x{rv:X8}, count={count}");
-                    return false;
-                }
-
-                IntPtr pSlots = Marshal.AllocHGlobal((int)count * 4);
-                try
-                {
-                    rv = cGetSlotList(1, pSlots, ref count);
-                    if (rv != 0)
+                    if (Directory.Exists(dir))
                     {
-                        Console.WriteLine($"[DEBUG] PKCS11 Check: cGetSlotList(2) failed: rv=0x{rv:X8}");
-                        return false;
-                    }
-
-                    int[] slots = new int[count];
-                    Marshal.Copy(pSlots, slots, 0, (int)count);
-
-                    foreach (int slotId in slots)
-                    {
-                        IntPtr hSession;
-                        rv = cOpenSession((uint)slotId, Pkcs11Const.CKF_SERIAL_SESSION, IntPtr.Zero, IntPtr.Zero, out hSession);
-                        if (rv != 0)
-                        {
-                            Console.WriteLine($"[DEBUG] PKCS11 Check: cOpenSession slot {slotId} failed: rv=0x{rv:X8}");
-                            continue;
-                        }
-
-                        bool loggedIn = false;
-                        try
-                        {
-                            if (!string.IsNullOrEmpty(pin))
-                            {
-                                byte[] pinBytes = Encoding.ASCII.GetBytes(pin);
-                                uint loginRv = cLogin(hSession, Pkcs11Const.CKU_USER, pinBytes, (uint)pinBytes.Length);
-                                Console.WriteLine($"[DEBUG] PKCS11 Check: cLogin status: 0x{loginRv:X8}");
-                                if (loginRv == 0 || loginRv == 0x00000100)
-                                {
-                                    loggedIn = true;
-                                }
-                            }
-
-                            IntPtr pClass = Marshal.AllocHGlobal(4);
-                            Marshal.WriteInt32(pClass, 1); // CKO_CERTIFICATE = 1
-                            try
-                            {
-                                CK_ATTRIBUTE[] template = new CK_ATTRIBUTE[1];
-                                template[0].type = 0; // CKA_CLASS = 0
-                                template[0].pValue = pClass;
-                                template[0].ulValueLen = 4;
-
-                                rv = cFindObjectsInit(hSession, template, 1);
-                                if (rv != 0) continue;
-
-                                try
-                                {
-                                    IntPtr phObject = Marshal.AllocHGlobal(400);
-                                    try
-                                    {
-                                        uint objCount;
-                                        rv = cFindObjects(hSession, phObject, 100, out objCount);
-                                        Console.WriteLine($"[DEBUG] PKCS11 Check: cFindObjects found {objCount} certificate objects (rv=0x{rv:X8}).");
-                                        if (rv == 0 && objCount > 0)
-                                        {
-                                            int[] handles = new int[objCount];
-                                            Marshal.Copy(phObject, handles, 0, (int)objCount);
- 
-                                            for (int i = 0; i < objCount; i++)
-                                            {
-                                                IntPtr hObj = (IntPtr)handles[i];
-                                                
-                                                CK_ATTRIBUTE[] valAttr = new CK_ATTRIBUTE[1];
-                                                valAttr[0].type = 17; // CKA_VALUE = 17
-                                                valAttr[0].pValue = IntPtr.Zero;
-                                                valAttr[0].ulValueLen = 0;
- 
-                                                uint rvSize = cGetAttributeValue(hSession, hObj, valAttr, 1);
-                                                if ((rvSize == 0 || rvSize == 0x00000150) && valAttr[0].ulValueLen > 0)
-                                                {
-                                                    uint len = valAttr[0].ulValueLen;
-                                                    IntPtr pVal = Marshal.AllocHGlobal((int)len);
-                                                    try
-                                                    {
-                                                        valAttr[0].pValue = pVal;
-                                                        uint rvVal = cGetAttributeValue(hSession, hObj, valAttr, 1);
-                                                        if (rvVal == 0)
-                                                        {
-                                                            byte[] certBytes = new byte[len];
-                                                            Marshal.Copy(pVal, certBytes, 0, (int)len);
-                                                            
-                                                            bool isMatch = CompareBytes(certBytes, certRawData);
-                                                            Console.WriteLine($"[DEBUG] PKCS11 Check: Cert {i} length {certBytes.Length} vs expected {certRawData.Length}. Match={isMatch}");
-                                                            if (isMatch)
-                                                            {
-                                                                return true;
-                                                            }
-                                                        }
-                                                        else
-                                                        {
-                                                            Console.WriteLine($"[DEBUG] PKCS11 Check: cGetAttributeValue value read failed: rv=0x{rvVal:X8}");
-                                                        }
-                                                    }
-                                                    finally
-                                                    {
-                                                        Marshal.FreeHGlobal(pVal);
-                                                    }
-                                                }
-                                                else
-                                                {
-                                                    Console.WriteLine($"[DEBUG] PKCS11 Check: cGetAttributeValue size read failed: rv=0x{rvSize:X8}, len={valAttr[0].ulValueLen}");
-                                                }
-                                            }
-                                        }
-                                    }
-                                    finally
-                                    {
-                                        Marshal.FreeHGlobal(phObject);
-                                    }
-                                }
-                                finally
-                                {
-                                    cFindObjectsFinal(hSession);
-                                }
-                            }
-                            finally
-                            {
-                                Marshal.FreeHGlobal(pClass);
-                            }
-                        }
-                        finally
-                        {
-                            if (loggedIn)
-                            {
-                                cLogout(hSession);
-                            }
-                            cCloseSession(hSession);
-                        }
+                        string normalPath = Path.Combine(dir, pattern + ".dll");
+                        if (File.Exists(normalPath)) return normalPath;
                     }
                 }
-                finally
-                {
-                    Marshal.FreeHGlobal(pSlots);
-                }
-            }
-            finally
-            {
-                cFinalize(IntPtr.Zero);
             }
         }
         catch {}
-        finally
-        {
-            Win32.FreeLibrary(hModule);
-        }
-        return false;
-    }
-
-    static bool CompareBytes(byte[] a, byte[] b)
-    {
-        if (a.Length != b.Length) return false;
-        for (int i = 0; i < a.Length; i++)
-        {
-            if (a[i] != b[i]) return false;
-        }
-        return true;
+        return null;
     }
 
     static T GetFuncLocal<T>(IntPtr hModule, string name) where T : Delegate
