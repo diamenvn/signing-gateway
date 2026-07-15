@@ -62,6 +62,33 @@ class Program
                 {
                     store.Close();
                 }
+
+                // Quet tat ca cac file PKCS#11 DLL trong thu muc he thong
+                Console.WriteLine("=== DANH SACH THU VIEN PKCS#11 ===");
+                string[] searchDirs = { 
+                    Environment.GetFolderPath(Environment.SpecialFolder.System),
+                    Environment.GetFolderPath(Environment.SpecialFolder.SystemX86)
+                };
+                foreach (var dir in searchDirs)
+                {
+                    if (Directory.Exists(dir))
+                    {
+                        try
+                        {
+                            var files = Directory.GetFiles(dir, "*csp11*.dll");
+                            foreach (var f in files)
+                            {
+                                Console.WriteLine($"PKCS11_DLL:{Path.GetFileName(f)}|PATH:{f}");
+                            }
+                            var pkcsFiles = Directory.GetFiles(dir, "*pkcs11*.dll");
+                            foreach (var f in pkcsFiles)
+                            {
+                                Console.WriteLine($"PKCS11_DLL:{Path.GetFileName(f)}|PATH:{f}");
+                            }
+                        }
+                        catch {}
+                    }
+                }
             }
             catch (Exception ex)
             {
