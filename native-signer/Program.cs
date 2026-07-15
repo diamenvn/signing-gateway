@@ -736,11 +736,51 @@ public class Pkcs11Signature : IExternalSignature
         return "RSA";
     }
 
+    private int GetParamSize(string name)
+    {
+        switch (name)
+        {
+            case "C_Initialize": return 4;
+            case "C_Finalize": return 4;
+            case "C_CloseSession": return 4;
+            case "C_Logout": return 4;
+            case "C_FindObjectsFinal": return 4;
+            case "C_GetSlotList": return 12;
+            case "C_FindObjectsInit": return 12;
+            case "C_SignInit": return 12;
+            case "C_Login": return 16;
+            case "C_FindObjects": return 16;
+            case "C_OpenSession": return 20;
+            case "C_Sign": return 20;
+            default: return 0;
+        }
+    }
+
     private T GetFunc<T>(IntPtr hModule, string name) where T : Delegate
     {
         IntPtr proc = GetProcAddress(hModule, name);
         if (proc == IntPtr.Zero)
+        {
+            // Fallback ho tro ten bi decorated tren 32-bit (x86) Windows
+            int size = GetParamSize(name);
+            if (size > 0)
+            {
+                // Thu dang _Name@size
+                string dec1 = $"_{name}@{size}";
+                proc = GetProcAddress(hModule, dec1);
+                
+                // Thu dang Name@size
+                if (proc == IntPtr.Zero)
+                {
+                    string dec2 = $"{name}@{size}";
+                    proc = GetProcAddress(hModule, dec2);
+                }
+            }
+        }
+
+        if (proc == IntPtr.Zero)
             throw new Exception($"Failed to find PKCS#11 function {name} in {_dllPath}");
+            
         return Marshal.GetDelegateForFunctionPointer<T>(proc);
     }
 
