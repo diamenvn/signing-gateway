@@ -1456,7 +1456,7 @@ public class Pkcs11Signature : IExternalSignature
         }
         finally
         {
-            FreeLibrary(hModule);
+            Win32.FreeLibrary(hModule);
         }
     }
 
