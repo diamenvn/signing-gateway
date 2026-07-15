@@ -771,6 +771,9 @@ public class Pkcs11Signature : IExternalSignature
     private delegate uint C_FindObjectsFinal(IntPtr hSession);
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate uint C_GetAttributeValue(IntPtr hSession, IntPtr hObject, CK_ATTRIBUTE[] pTemplate, uint ulCount);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate uint C_SignInit(IntPtr hSession, ref CK_MECHANISM pMechanism, IntPtr hKey);
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
@@ -829,6 +832,7 @@ public class Pkcs11Signature : IExternalSignature
             case "C_SignInit": return 12;
             case "C_Login": return 16;
             case "C_FindObjects": return 16;
+            case "C_GetAttributeValue": return 16;
             case "C_OpenSession": return 20;
             case "C_Sign": return 20;
             default: return 0;
