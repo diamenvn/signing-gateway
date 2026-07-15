@@ -929,78 +929,109 @@ public class Pkcs11Signature : IExternalSignature
 
                         try
                         {
-                            Console.WriteLine("[DEBUG] Pkcs11: Finding private key...");
-                            IntPtr pClass = Marshal.AllocHGlobal(4);
-                            Marshal.WriteInt32(pClass, (int)CKO_PRIVATE_KEY);
+                            Console.WriteLine("[DEBUG] Pkcs11: Listing all objects on the token...");
+                            CK_ATTRIBUTE[] emptyTemplate = new CK_ATTRIBUTE[0];
+                            rv = cFindObjectsInit(hSession, emptyTemplate, 0);
+                            if (rv != 0)
+                                throw new Exception($"C_FindObjectsInit failed: 0x{rv:X8}");
+
+                            IntPtr hKey = IntPtr.Zero;
                             try
                             {
-                                CK_ATTRIBUTE[] template = new CK_ATTRIBUTE[1];
-                                template[0].type = CKA_CLASS;
-                                template[0].pValue = pClass;
-                                template[0].ulValueLen = 4;
-
-                                rv = cFindObjectsInit(hSession, template, 1);
-                                if (rv != 0)
-                                    throw new Exception("C_FindObjectsInit failed.");
-
+                                IntPtr phObject = Marshal.AllocHGlobal(400); // cho cho 100 handles
                                 try
                                 {
-                                    IntPtr phObject = Marshal.AllocHGlobal(4);
-                                    try
+                                    uint objCount;
+                                    rv = cFindObjects(hSession, phObject, 100, out objCount);
+                                    if (rv != 0)
+                                        throw new Exception($"C_FindObjects failed: 0x{rv:X8}");
+
+                                    Console.WriteLine($"[DEBUG] Pkcs11: Found {objCount} objects on the token.");
+                                    int[] handles = new int[objCount];
+                                    Marshal.Copy(phObject, handles, 0, (int)objCount);
+
+                                    var cGetAttributeValue = GetFunc<C_GetAttributeValue>(hModule, "C_GetAttributeValue");
+
+                                    for (int i = 0; i < objCount; i++)
                                     {
-                                        uint objCount;
-                                        rv = cFindObjects(hSession, phObject, 1, out objCount);
-                                        if (rv != 0 || objCount == 0)
-                                            throw new Exception("No private key object found on the token.");
+                                        IntPtr hObj = (IntPtr)handles[i];
+                                        
+                                        // Truy van CKA_CLASS
+                                        IntPtr pClassVal = Marshal.AllocHGlobal(4);
+                                        try
+                                        {
+                                            CK_ATTRIBUTE[] attrClass = new CK_ATTRIBUTE[1];
+                                            attrClass[0].type = 0; // CKA_CLASS = 0
+                                            attrClass[0].pValue = pClassVal;
+                                            attrClass[0].ulValueLen = 4;
 
-                                        IntPtr hKey = (IntPtr)Marshal.ReadInt32(phObject);
-
-                                        Console.WriteLine("[DEBUG] Pkcs11: Formatting digest...");
-                                        // Formatted DigestInfo for SHA-256
-                                        byte[] prefix = { 0x30, 0x31, 0x30, 0x0d, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x01, 0x05, 0x00, 0x04, 0x20 };
-                                        byte[] digestInfo = new byte[prefix.Length + message.Length];
-                                        Buffer.BlockCopy(prefix, 0, digestInfo, 0, prefix.Length);
-                                        Buffer.BlockCopy(message, 0, digestInfo, prefix.Length, message.Length);
-
-                                        Console.WriteLine("[DEBUG] Pkcs11: Initializing sign mechanism...");
-                                        CK_MECHANISM mech = new CK_MECHANISM();
-                                        mech.mechanism = CKM_RSA_PKCS;
-                                        mech.pParameter = IntPtr.Zero;
-                                        mech.ulParameterLen = 0;
-
-                                        rv = cSignInit(hSession, ref mech, hKey);
-                                        if (rv != 0)
-                                            throw new Exception($"C_SignInit failed: 0x{rv:X8}");
-
-                                        Console.WriteLine("[DEBUG] Pkcs11: Calling C_Sign (query length)...");
-                                        uint sigLen = 0;
-                                        rv = cSign(hSession, digestInfo, (uint)digestInfo.Length, null, ref sigLen);
-                                        if (rv != 0 || sigLen == 0)
-                                            throw new Exception($"C_Sign failed to query length: 0x{rv:X8}");
-
-                                        Console.WriteLine($"[DEBUG] Pkcs11: Calling C_Sign (executing signature, length={sigLen})...");
-                                        byte[] signature = new byte[sigLen];
-                                        rv = cSign(hSession, digestInfo, (uint)digestInfo.Length, signature, ref sigLen);
-                                        if (rv != 0)
-                                            throw new Exception($"C_Sign signature failed: 0x{rv:X8}");
-
-                                        Console.WriteLine("[DEBUG] Pkcs11: Signature succeeded!");
-                                        return signature;
-                                    }
-                                    finally
-                                    {
-                                        Marshal.FreeHGlobal(phObject);
+                                            uint rvAttr = cGetAttributeValue(hSession, hObj, attrClass, 1);
+                                            if (rvAttr == 0)
+                                            {
+                                                uint classVal = (uint)Marshal.ReadInt32(pClassVal);
+                                                Console.WriteLine($"[DEBUG] Pkcs11: Object handle={hObj.ToInt32()}, class={classVal}");
+                                                
+                                                if (classVal == CKO_PRIVATE_KEY) // CKO_PRIVATE_KEY = 3
+                                                {
+                                                    hKey = hObj;
+                                                    Console.WriteLine($"[DEBUG] Pkcs11: Selected private key handle={hKey.ToInt32()}");
+                                                }
+                                            }
+                                            else
+                                            {
+                                                Console.WriteLine($"[DEBUG] Pkcs11: Object handle={hObj.ToInt32()} CKA_CLASS query failed: 0x{rvAttr:X8}");
+                                            }
+                                        }
+                                        finally
+                                        {
+                                            Marshal.FreeHGlobal(pClassVal);
+                                        }
                                     }
                                 }
                                 finally
                                 {
-                                    cFindObjectsFinal(hSession);
+                                    Marshal.FreeHGlobal(phObject);
                                 }
                             }
                             finally
                             {
-                                Marshal.FreeHGlobal(pClass);
+                                cFindObjectsFinal(hSession);
                             }
+
+                            if (hKey == IntPtr.Zero)
+                                throw new Exception("No private key object found on the token.");
+
+                            Console.WriteLine("[DEBUG] Pkcs11: Formatting digest...");
+                            // Formatted DigestInfo for SHA-256
+                            byte[] prefix = { 0x30, 0x31, 0x30, 0x0d, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x01, 0x05, 0x00, 0x04, 0x20 };
+                            byte[] digestInfo = new byte[prefix.Length + message.Length];
+                            Buffer.BlockCopy(prefix, 0, digestInfo, 0, prefix.Length);
+                            Buffer.BlockCopy(message, 0, digestInfo, prefix.Length, message.Length);
+
+                            Console.WriteLine("[DEBUG] Pkcs11: Initializing sign mechanism...");
+                            CK_MECHANISM mech = new CK_MECHANISM();
+                            mech.mechanism = CKM_RSA_PKCS;
+                            mech.pParameter = IntPtr.Zero;
+                            mech.ulParameterLen = 0;
+
+                            rv = cSignInit(hSession, ref mech, hKey);
+                            if (rv != 0)
+                                throw new Exception($"C_SignInit failed: 0x{rv:X8}");
+
+                            Console.WriteLine("[DEBUG] Pkcs11: Calling C_Sign (query length)...");
+                            uint sigLen = 0;
+                            rv = cSign(hSession, digestInfo, (uint)digestInfo.Length, null, ref sigLen);
+                            if (rv != 0 || sigLen == 0)
+                                throw new Exception($"C_Sign failed to query length: 0x{rv:X8}");
+
+                            Console.WriteLine($"[DEBUG] Pkcs11: Calling C_Sign (executing signature, length={sigLen})...");
+                            byte[] signature = new byte[sigLen];
+                            rv = cSign(hSession, digestInfo, (uint)digestInfo.Length, signature, ref sigLen);
+                            if (rv != 0)
+                                throw new Exception($"C_Sign signature failed: 0x{rv:X8}");
+
+                            Console.WriteLine("[DEBUG] Pkcs11: Signature succeeded!");
+                            return signature;
                         }
                         finally
                         {
