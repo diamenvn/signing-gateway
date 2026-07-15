@@ -7,6 +7,7 @@ using iTextSharp.text.pdf;
 using iTextSharp.text.pdf.security;
 using System.Text;
 using System.Runtime.InteropServices;
+using System.Collections.Generic;
 
 class Program
 {
@@ -259,9 +260,55 @@ public class CngUserSignature : IExternalSignature
         return null;
     }
 
+    [DllImport("winscard.dll", CharSet = CharSet.Unicode)]
+    private static extern int SCardEstablishContext(uint dwScope, IntPtr pvReserved1, IntPtr pvReserved2, out IntPtr phContext);
+
+    [DllImport("winscard.dll", CharSet = CharSet.Unicode)]
+    private static extern int SCardReleaseContext(IntPtr hContext);
+
+    [DllImport("winscard.dll", CharSet = CharSet.Unicode)]
+    private static extern int SCardListReaders(IntPtr hContext, string mszGroups, byte[] mszReaders, ref uint pcchReaders);
+
+    private List<string> GetReaderNames()
+    {
+        List<string> readers = new List<string>();
+        IntPtr hContext = IntPtr.Zero;
+        try
+        {
+            int ret = SCardEstablishContext(0, IntPtr.Zero, IntPtr.Zero, out hContext);
+            if (ret == 0)
+            {
+                uint pcchReaders = 0;
+                ret = SCardListReaders(hContext, null, null, ref pcchReaders);
+                if (ret == 0 && pcchReaders > 0)
+                {
+                    byte[] mszReaders = new byte[pcchReaders * 2]; // unicode
+                    ret = SCardListReaders(hContext, null, mszReaders, ref pcchReaders);
+                    if (ret == 0)
+                      {
+                        string allReaders = Encoding.Unicode.GetString(mszReaders);
+                        string[] split = allReaders.Split('\0');
+                        foreach (string r in split)
+                        {
+                            if (!string.IsNullOrEmpty(r))
+                                readers.Add(r);
+                        }
+                    }
+                }
+            }
+        }
+        catch {}
+        finally
+        {
+            if (hContext != IntPtr.Zero) SCardReleaseContext(hContext);
+        }
+        return readers;
+    }
+
     public byte[] Sign(byte[] message)
     {
         Console.WriteLine("[DEBUG] Bat dau phuong thuc Sign...");
+        Console.WriteLine($"[DEBUG] Sign: pin length = {(_pin != null ? _pin.Length : 0)}");
         
         CRYPT_KEY_PROV_INFO? provInfoOpt = GetKeyProvInfo();
         if (provInfoOpt == null)
@@ -283,22 +330,56 @@ public class CngUserSignature : IExternalSignature
         {
             Console.WriteLine("[DEBUG] Thu mo bang Microsoft Smart Card Key Storage Provider (CNG)...");
             CngProvider cngProvider = new CngProvider("Microsoft Smart Card Key Storage Provider");
-            using (CngKey cngKey = CngKey.Open(provInfo.pwszContainerName, cngProvider, CngKeyOpenOptions.Silent))
-            {
-                if (!string.IsNullOrEmpty(_pin))
-                {
-                    Console.WriteLine("[DEBUG] Dang set PIN cho CngKey...");
-                    byte[] pinBytes = Encoding.Unicode.GetBytes(_pin + '\0');
-                    CngProperty pinProperty = new CngProperty("SmartCardPin", pinBytes, CngPropertyOptions.None);
-                    cngKey.SetProperty(pinProperty);
-                }
+            CngKey cngKey = null;
 
-                using (var rsaCng = new RSACng(cngKey))
+            // A. Thu ghep voi tung Reader dang ket noi
+            List<string> readers = GetReaderNames();
+            Console.WriteLine($"[DEBUG] So luong smart card reader tim thay: {readers.Count}");
+            foreach (var r in readers)
+            {
+                try
                 {
-                    Console.WriteLine("[DEBUG] Dang ky bang RSACng...");
-                    byte[] sig = rsaCng.SignData(message, new HashAlgorithmName(_hashAlgorithm), RSASignaturePadding.Pkcs1);
-                    Console.WriteLine("[DEBUG] Ky bang RSACng thanh cong.");
-                    return sig;
+                    string fullContainer = $"\\\\.\\{r}\\{provInfo.pwszContainerName}";
+                    Console.WriteLine($"[DEBUG] Thu mo cngKey voi container ghep reader: {fullContainer}");
+                    cngKey = CngKey.Open(fullContainer, cngProvider, CngKeyOpenOptions.Silent);
+                    if (cngKey != null)
+                    {
+                        Console.WriteLine($"[DEBUG] Mo cngKey bang ghep reader [{r}] thanh cong.");
+                        break;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[DEBUG] Mo voi reader [{r}] loi: {ex.Message}");
+                }
+            }
+
+            // B. Fallback mo bang container name thuan
+            if (cngKey == null)
+            {
+                Console.WriteLine($"[DEBUG] Thu mo cngKey bang container name thuan: {provInfo.pwszContainerName}");
+                cngKey = CngKey.Open(provInfo.pwszContainerName, cngProvider, CngKeyOpenOptions.Silent);
+            }
+
+            if (cngKey != null)
+            {
+                using (cngKey)
+                {
+                    if (!string.IsNullOrEmpty(_pin))
+                    {
+                        Console.WriteLine("[DEBUG] Dang set PIN cho CngKey...");
+                        byte[] pinBytes = Encoding.Unicode.GetBytes(_pin + '\0');
+                        CngProperty pinProperty = new CngProperty("SmartCardPin", pinBytes, CngPropertyOptions.None);
+                        cngKey.SetProperty(pinProperty);
+                    }
+
+                    using (var rsaCng = new RSACng(cngKey))
+                    {
+                        Console.WriteLine("[DEBUG] Dang ky bang RSACng...");
+                        byte[] sig = rsaCng.SignData(message, new HashAlgorithmName(_hashAlgorithm), RSASignaturePadding.Pkcs1);
+                        Console.WriteLine("[DEBUG] Ky bang RSACng thanh cong.");
+                        return sig;
+                    }
                 }
             }
         }
