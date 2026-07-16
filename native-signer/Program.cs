@@ -17,6 +17,7 @@ class Program
 {
     static int Main(string[] args)
     {
+        Console.OutputEncoding = Encoding.UTF8;
         string input = null;
         string output = null;
         string serial = null;
