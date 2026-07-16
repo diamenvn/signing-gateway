@@ -631,6 +631,16 @@ class Program
 
     static string GetCertCN(X509Certificate2 cert)
     {
+        try
+        {
+            string cn = cert.GetNameInfo(X509NameType.SimpleName, false);
+            if (!string.IsNullOrEmpty(cn))
+            {
+                return cn;
+            }
+        }
+        catch {}
+
         string subject = cert.Subject;
         foreach (string part in subject.Split(','))
         {
