@@ -1550,6 +1550,12 @@ async function signPdfNative(cfg, pdfBase64, opts) {
     try {
       await new Promise((resolve, reject) => {
         execFile(exePath, args, { windowsHide: true, timeout: cfg.signTimeoutMs, killSignal: 'SIGKILL' }, (err, stdout, stderr) => {
+          // Ghi de log debug de nguoi dung de kiem tra
+          try {
+            const debugLogPath = path.join(BASE_DIR, 'pdf-signer-debug.log');
+            fs.writeFileSync(debugLogPath, `--- LAST RUN AT ${new Date().toISOString()} ---\nARGS: ${JSON.stringify(args)}\n\n--- STDOUT ---\n${stdout}\n\n--- STDERR ---\n${stderr}\n`, 'utf8');
+          } catch (_) {}
+
           if (err) {
             log('error', `Loi khi thuc thi pdf-signer.exe:\nStdout: ${stdout}\nStderr: ${stderr}`);
             const errorMsg = stderr.trim() || stdout.trim() || err.message;
