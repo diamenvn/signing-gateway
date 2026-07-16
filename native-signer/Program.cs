@@ -110,6 +110,7 @@ class Program
                                     {
                                         string msg = ex.Message.ToLower();
                                         int hr = ex.HResult;
+                                        Console.WriteLine($"[DEBUG_LIST] Cert: {cn}, Msg: {ex.Message}, HR: {hr} (0x{hr:X})");
                                         // Nếu là lỗi đòi PIN hoặc hủy giao diện -> Thiết bị đang cắm thực tế!
                                         bool isPluggedIn = msg.Contains("silent") || msg.Contains("pin") || msg.Contains("cancelled") ||
                                                            hr == -2146893790 || hr == -2146893779;
@@ -143,6 +144,7 @@ class Program
                                         {
                                             string msg = ex.Message.ToLower();
                                             int hr = ex.HResult;
+                                            Console.WriteLine($"[DEBUG_LIST_CSP] Cert: {cn}, Msg: {ex.Message}, HR: {hr} (0x{hr:X})");
                                             bool isPluggedIn = msg.Contains("silent") || msg.Contains("pin") || msg.Contains("cancelled") ||
                                                                hr == -2146893790 || hr == -2146893779;
                                             if (!isPluggedIn) continue;
