@@ -12,7 +12,6 @@ using System.Collections.Generic;
 using System.Reflection;
 using System.Xml;
 using System.Security.Cryptography.Xml;
-using iTextSharp.text.pdf.parser;
 
 class Program
 {
@@ -376,7 +375,7 @@ class Program
                 for (int pNum = 1; pNum <= totalPages; pNum++)
                 {
                     finder.SetPage(pNum);
-                    PdfReaderContentParser parser = new PdfReaderContentParser(reader);
+                    iTextSharp.text.pdf.parser.PdfReaderContentParser parser = new iTextSharp.text.pdf.parser.PdfReaderContentParser(reader);
                     parser.ProcessContent(pNum, finder);
 
                     if (finder.FoundX.HasValue && finder.FoundY.HasValue)
@@ -1799,7 +1798,7 @@ public class Pkcs11Rsa : RSA
     }
 }
 
-public class TextAnchorFinder : IRenderListener
+public class TextAnchorFinder : iTextSharp.text.pdf.parser.IRenderListener
 {
     private readonly string _targetText;
     public float? FoundX { get; private set; }
@@ -1811,20 +1810,20 @@ public class TextAnchorFinder : IRenderListener
         _targetText = targetText;
     }
 
-    public void RenderText(TextRenderInfo renderInfo)
+    public void RenderText(iTextSharp.text.pdf.parser.TextRenderInfo renderInfo)
     {
         string text = renderInfo.GetText();
         if (text != null && text.Contains(_targetText))
         {
             var segment = renderInfo.GetBaseline();
-            FoundX = segment.GetStartPoint()[Vector.I1];
-            FoundY = segment.GetStartPoint()[Vector.I2];
+            FoundX = segment.GetStartPoint()[iTextSharp.text.pdf.parser.Vector.I1];
+            FoundY = segment.GetStartPoint()[iTextSharp.text.pdf.parser.Vector.I2];
         }
     }
 
     public void BeginTextBlock() {}
     public void EndTextBlock() {}
-    public void RenderImage(ImageRenderInfo renderInfo) {}
+    public void RenderImage(iTextSharp.text.pdf.parser.ImageRenderInfo renderInfo) {}
 
     public void SetPage(int page)
     {
