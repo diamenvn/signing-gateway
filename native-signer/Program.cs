@@ -402,8 +402,10 @@ class Program
             
             // Build text thong tin nguoi ky
             string subjectCN = GetCertCN(cert);
+            Console.WriteLine($"[DEBUG] subjectCN lay duoc: '{subjectCN}'");
             string signingTimeStr = DateTime.Now.ToString("dd/MM/yyyy HH:mm:ss");
             string text = $"Ký bởi: {subjectCN}\nNgày ký: {signingTimeStr}";
+            Console.WriteLine($"[DEBUG] Chu ky text duoc build: '{text.Replace("\n", " | ")}'");
             if (!string.IsNullOrEmpty(description))
             {
                 text += $"\nLý do: {description}";

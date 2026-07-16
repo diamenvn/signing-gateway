@@ -1562,6 +1562,9 @@ async function signPdfNative(cfg, pdfBase64, opts) {
             
             reject(new Error(errorMsg));
           } else {
+            if (stdout && stdout.trim()) {
+              log('info', `[pdf-signer.exe Output]:\n${stdout.trim()}`);
+            }
             resolve();
           }
         });
