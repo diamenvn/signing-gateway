@@ -1446,7 +1446,9 @@ async function signPdfNative(cfg, pdfBase64, opts) {
   if (!exePath) {
     const packagedPath = path.join(BASE_DIR, 'bin', 'pdf-signer.exe');
     const devPath = path.join(__dirname, 'bin', 'pdf-signer.exe');
-    exePath = fs.existsSync(packagedPath) ? packagedPath : devPath;
+    exePath = process.pkg
+      ? (fs.existsSync(packagedPath) ? packagedPath : devPath)
+      : (fs.existsSync(devPath) ? devPath : packagedPath);
   }
   if (!fs.existsSync(exePath)) {
     throw new Error(`File executable ky so khong ton tai: ${exePath}`);
@@ -1572,7 +1574,9 @@ async function signXmlNative(cfg, xmlString, opts) {
   if (!exePath) {
     const packagedPath = path.join(BASE_DIR, 'bin', 'pdf-signer.exe');
     const devPath = path.join(__dirname, 'bin', 'pdf-signer.exe');
-    exePath = fs.existsSync(packagedPath) ? packagedPath : devPath;
+    exePath = process.pkg
+      ? (fs.existsSync(packagedPath) ? packagedPath : devPath)
+      : (fs.existsSync(devPath) ? devPath : packagedPath);
   }
   if (!fs.existsSync(exePath)) {
     throw new Error(`File executable ky so khong ton tai: ${exePath}`);
@@ -1661,19 +1665,6 @@ function extractEmbeddedSigner() {
     }
 
     let needsExtract = true;
-    // Luon ghi de chu dong khi cap nhat ban moi de tranh file gia lap trong pkg co timestamp cu hon file tren dia.
-    // Neu file dang bi khoa boi tien trinh khac, ta catch loi va ghi log thoi.
-    try {
-      if (fs.existsSync(targetExePath)) {
-        const embeddedStat = fs.statSync(embeddedExePath);
-        const targetStat = fs.statSync(targetExePath);
-        if (targetStat.size === embeddedStat.size) {
-          needsExtract = false;
-        }
-      }
-    } catch (_) {
-      needsExtract = true;
-    }
 
     if (needsExtract) {
       log('info', `Dang tu dong giai nen pdf-signer.exe sang: ${targetExePath}`);
