@@ -1526,6 +1526,23 @@ async function signPdfNative(cfg, pdfBase64, opts) {
       args.push('--tsize', String(tsize));
     }
 
+    const signmark = opts.signmark || '';
+    if (signmark) {
+      args.push('--signmark', signmark);
+      if (typeof opts.width === 'number' || typeof opts.width === 'string') {
+        args.push('--smwidth', String(opts.width));
+      }
+      if (typeof opts.height === 'number' || typeof opts.height === 'string') {
+        args.push('--smheight', String(opts.height));
+      }
+      if (typeof opts.offsetX === 'number' || typeof opts.offsetX === 'string') {
+        args.push('--smoffsetx', String(opts.offsetX));
+      }
+      if (typeof opts.offsetY === 'number' || typeof opts.offsetY === 'string') {
+        args.push('--smoffsety', String(opts.offsetY));
+      }
+    }
+
     // 5. Thuc thi file .exe
     log('info', `Goi pdf-signer.exe de ky file. Serial: ${serial}, Pin: ${pin ? '***' : '(trong)'}`);
     

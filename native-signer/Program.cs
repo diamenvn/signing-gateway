@@ -12,6 +12,7 @@ using System.Collections.Generic;
 using System.Reflection;
 using System.Xml;
 using System.Security.Cryptography.Xml;
+using iTextSharp.text.pdf.parser;
 
 class Program
 {
@@ -30,6 +31,12 @@ class Program
         string image = null;
         string colorStr = null;
         float tsize = 8.5f;
+
+        string signmark = null;
+        float smWidth = 150f;
+        float smHeight = 75f;
+        float smOffsetX = 0f;
+        float smOffsetY = -45f;
 
         bool listOnly = false;
         bool testPkcs11 = false;
@@ -52,6 +59,11 @@ class Program
             else if (args[i] == "--image" && i + 1 < args.Length) image = args[++i];
             else if (args[i] == "--color" && i + 1 < args.Length) colorStr = args[++i];
             else if (args[i] == "--tsize" && i + 1 < args.Length) float.TryParse(args[++i], out tsize);
+            else if (args[i] == "--signmark" && i + 1 < args.Length) signmark = args[++i];
+            else if (args[i] == "--smwidth" && i + 1 < args.Length) float.TryParse(args[++i], out smWidth);
+            else if (args[i] == "--smheight" && i + 1 < args.Length) float.TryParse(args[++i], out smHeight);
+            else if (args[i] == "--smoffsetx" && i + 1 < args.Length) float.TryParse(args[++i], out smOffsetX);
+            else if (args[i] == "--smoffsety" && i + 1 < args.Length) float.TryParse(args[++i], out smOffsetY);
         }
 
         if (listOnly)
@@ -243,7 +255,8 @@ class Program
 
             Console.WriteLine($"[INFO] Da tim thay chung thu: {cert.Subject}");
             Console.WriteLine($"[INFO] Dang tien hanh ky file PDF: {input} -> {output}...");
-            SignPdf(input, output, cert, pin, page, llx, lly, urx, ury, desc, image, colorStr, tsize);
+            SignPdf(input, output, cert, pin, page, llx, lly, urx, ury, desc, image, colorStr, tsize,
+                    signmark, smWidth, smHeight, smOffsetX, smOffsetY);
             Console.WriteLine("[INFO] Ky so thanh cong!");
             return 0;
         }
@@ -303,7 +316,12 @@ class Program
         string description, 
         string imagePath,
         string colorStr,
-        float tsize)
+        float tsize,
+        string signmark,
+        float smWidth,
+        float smHeight,
+        float smOffsetX,
+        float smOffsetY)
     {
         Console.WriteLine("[DEBUG] Bat dau SignPdf...");
         // 1. Dung chuoi chung thu (cert chain)
@@ -342,9 +360,46 @@ class Program
         {
             Console.WriteLine("[DEBUG] Da mo PdfReader, FileStream, PdfStamper...");
             PdfSignatureAppearance appearance = stamper.SignatureAppearance;
+
+            int targetPage = page;
+            float actualLlx = llx;
+            float actualLly = lly;
+            float actualUrx = urx;
+            float actualUry = ury;
+
+            if (!string.IsNullOrEmpty(signmark))
+            {
+                Console.WriteLine($"[INFO] Dang tim kiem vi tri signmark: '{signmark}'...");
+                var finder = new TextAnchorFinder(signmark);
+                bool found = false;
+                int totalPages = reader.NumberOfPages;
+                for (int pNum = 1; pNum <= totalPages; pNum++)
+                {
+                    finder.SetPage(pNum);
+                    PdfReaderContentParser parser = new PdfReaderContentParser(reader);
+                    parser.ProcessContent(pNum, finder);
+
+                    if (finder.FoundX.HasValue && finder.FoundY.HasValue)
+                    {
+                        targetPage = finder.FoundPage;
+                        actualLlx = finder.FoundX.Value + smOffsetX;
+                        actualLly = finder.FoundY.Value + smOffsetY;
+                        actualUrx = actualLlx + smWidth;
+                        actualUry = actualLly + smHeight;
+                        found = true;
+                        Console.WriteLine($"[INFO] Da tim thay signmark tai Page {targetPage}, X={finder.FoundX.Value}, Y={finder.FoundY.Value}. Toa do ky: llx={actualLlx}, lly={actualLly}, urx={actualUrx}, ury={actualUry}");
+                        break;
+                    }
+                }
+
+                if (!found)
+                {
+                    throw new Exception($"SIGNMARK_NOT_FOUND: Khong tim thay tu khoa signmark '{signmark}' trong file PDF.");
+                }
+            }
             
             // Thiet lap vi tri chu ky visible
-            appearance.SetVisibleSignature(new iTextSharp.text.Rectangle(llx, lly, urx, ury), page, null);
+            appearance.SetVisibleSignature(new iTextSharp.text.Rectangle(actualLlx, actualLly, actualUrx, actualUry), targetPage, null);
             
             // Build text thong tin nguoi ky
             string subjectCN = GetCertCN(cert);
@@ -1741,5 +1796,38 @@ public class Pkcs11Rsa : RSA
             _publicKey.Dispose();
         }
         base.Dispose(disposing);
+    }
+}
+
+public class TextAnchorFinder : IRenderListener
+{
+    private readonly string _targetText;
+    public float? FoundX { get; private set; }
+    public float? FoundY { get; private set; }
+    public int FoundPage { get; private set; } = 1;
+
+    public TextAnchorFinder(string targetText)
+    {
+        _targetText = targetText;
+    }
+
+    public void RenderText(TextRenderInfo renderInfo)
+    {
+        string text = renderInfo.GetText();
+        if (text != null && text.Contains(_targetText))
+        {
+            var segment = renderInfo.GetBaseline();
+            FoundX = segment.GetStartPoint()[Vector.I1];
+            FoundY = segment.GetStartPoint()[Vector.I2];
+        }
+    }
+
+    public void BeginTextBlock() {}
+    public void EndTextBlock() {}
+    public void RenderImage(ImageRenderInfo renderInfo) {}
+
+    public void SetPage(int page)
+    {
+        FoundPage = page;
     }
 }
