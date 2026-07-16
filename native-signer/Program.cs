@@ -944,7 +944,7 @@ public class CngUserSignature : IExternalSignature
         return readers;
     }
 
-    private void SetCspPin(RSACryptoServiceProvider rsaCsp, string pin, bool isUnicode, bool withNull)
+    private void SetCspPin(RSACryptoServiceProvider rsaCsp, string pin, bool isUnicode, bool withNull = true)
     {
         var field = typeof(RSACryptoServiceProvider).GetField("_safeProvHandle", BindingFlags.NonPublic | BindingFlags.Instance);
         if (field != null)
@@ -995,7 +995,7 @@ public class CngUserSignature : IExternalSignature
         catch {}
     }
 
-    private void SetCngPin(CngKey cngKey, string pin, bool isUnicode, bool withNull)
+    private void SetCngPin(CngKey cngKey, string pin, bool isUnicode, bool withNull = true)
     {
         string finalPin = withNull ? pin + '\0' : pin;
         byte[] pinBytes = isUnicode ? Encoding.Unicode.GetBytes(finalPin) : Encoding.ASCII.GetBytes(finalPin);
