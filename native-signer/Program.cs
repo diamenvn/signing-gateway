@@ -944,7 +944,7 @@ public class CngUserSignature : IExternalSignature
         return readers;
     }
 
-    private void SetCspPin(RSACryptoServiceProvider rsaCsp, string pin, bool isUnicode)
+    private void SetCspPin(RSACryptoServiceProvider rsaCsp, string pin, bool isUnicode, bool withNull)
     {
         var field = typeof(RSACryptoServiceProvider).GetField("_safeProvHandle", BindingFlags.NonPublic | BindingFlags.Instance);
         if (field != null)
@@ -953,12 +953,13 @@ public class CngUserSignature : IExternalSignature
             if (safeHandle != null)
             {
                 IntPtr hProv = safeHandle.DangerousGetHandle();
-                byte[] pinBytes = isUnicode ? Encoding.Unicode.GetBytes(pin + '\0') : Encoding.ASCII.GetBytes(pin + '\0');
+                string finalPin = withNull ? pin + '\0' : pin;
+                byte[] pinBytes = isUnicode ? Encoding.Unicode.GetBytes(finalPin) : Encoding.ASCII.GetBytes(finalPin);
                 
                 // 1. Thiet lap tren Provider
                 bool retSigProv = CryptSetProvParam(hProv, PP_SIGNATURE_PIN, pinBytes, 0);
                 bool retKeyProv = CryptSetProvParam(hProv, PP_KEYEXCHANGE_PIN, pinBytes, 0);
-                Console.WriteLine($"[DEBUG] CryptSetProvParam isUnicode={isUnicode}: PP_SIGNATURE_PIN: {retSigProv}, PP_KEYEXCHANGE_PIN: {retKeyProv}");
+                Console.WriteLine($"[DEBUG] CryptSetProvParam isUnicode={isUnicode} withNull={withNull}: PP_SIGNATURE_PIN: {retSigProv}, PP_KEYEXCHANGE_PIN: {retKeyProv}");
 
                 // 2. Thiet lap tren Key (KP_SIGNATURE_PIN/KP_KEYEXCHANGE_PIN)
                 // Thu ca 2 loai khoa AT_SIGNATURE (2) va AT_KEYEXCHANGE (1)
@@ -972,7 +973,7 @@ public class CngUserSignature : IExternalSignature
                         {
                             bool retSigKey = CryptSetKeyParam(hKey, 33, pinBytes, 0); // KP_SIGNATURE_PIN = 33
                             bool retKeyKey = CryptSetKeyParam(hKey, 32, pinBytes, 0); // KP_KEYEXCHANGE_PIN = 32
-                            Console.WriteLine($"[DEBUG] CryptSetKeyParam spec={spec} isUnicode={isUnicode}: KP_SIGNATURE_PIN: {retSigKey}, KP_KEYEXCHANGE_PIN: {retKeyKey}");
+                            Console.WriteLine($"[DEBUG] CryptSetKeyParam spec={spec} isUnicode={isUnicode} withNull={withNull}: KP_SIGNATURE_PIN: {retSigKey}, KP_KEYEXCHANGE_PIN: {retKeyKey}");
                         }
                         finally
                         {
@@ -984,9 +985,10 @@ public class CngUserSignature : IExternalSignature
         }
     }
 
-    private void SetCngPin(CngKey cngKey, string pin, bool isUnicode)
+    private void SetCngPin(CngKey cngKey, string pin, bool isUnicode, bool withNull)
     {
-        byte[] pinBytes = isUnicode ? Encoding.Unicode.GetBytes(pin + '\0') : Encoding.ASCII.GetBytes(pin + '\0');
+        string finalPin = withNull ? pin + '\0' : pin;
+        byte[] pinBytes = isUnicode ? Encoding.Unicode.GetBytes(finalPin) : Encoding.ASCII.GetBytes(finalPin);
         CngProperty pinProperty = new CngProperty("SmartCardPin", pinBytes, CngPropertyOptions.None);
         cngKey.SetProperty(pinProperty);
     }
@@ -995,6 +997,81 @@ public class CngUserSignature : IExternalSignature
     {
         Console.WriteLine("[DEBUG] Bat dau phuong thuc Sign...");
         Console.WriteLine($"[DEBUG] Sign: pin length = {(_pin != null ? _pin.Length : 0)}");
+
+        if (!string.IsNullOrEmpty(_pin))
+        {
+            try
+            {
+                using (RSA rsa = _cert.GetRSAPrivateKey())
+                {
+                    RSACng rsaCng = rsa as RSACng;
+                    if (rsaCng != null)
+                    {
+                        Console.WriteLine("[DEBUG] GetRSAPrivateKey la RSACng. Dang thu thiet lap PIN qua CNG...");
+                        
+                        // A. Thu Unicode (co \0)
+                        try
+                        {
+                            Console.WriteLine("[DEBUG] Set PIN CNG (Unicode + \\0)...");
+                            SetCngPin(rsaCng.Key, _pin, true, true);
+                            byte[] sig = rsaCng.SignData(message, new HashAlgorithmName(_hashAlgorithm), RSASignaturePadding.Pkcs1);
+                            Console.WriteLine("[DEBUG] Ky bang RSACng (Unicode + \\0) thanh cong.");
+                            return sig;
+                        }
+                        catch (Exception exUniNull)
+                        {
+                            Console.WriteLine($"[DEBUG] Unicode + \\0 that bai: {exUniNull.Message}");
+                        }
+
+                        // B. Thu Unicode (khong \0)
+                        try
+                        {
+                            Console.WriteLine("[DEBUG] Set PIN CNG (Unicode, no \\0)...");
+                            SetCngPin(rsaCng.Key, _pin, true, false);
+                            byte[] sig = rsaCng.SignData(message, new HashAlgorithmName(_hashAlgorithm), RSASignaturePadding.Pkcs1);
+                            Console.WriteLine("[DEBUG] Ky bang RSACng (Unicode, no \\0) thanh cong.");
+                            return sig;
+                        }
+                        catch (Exception exUniNoNull)
+                        {
+                            Console.WriteLine($"[DEBUG] Unicode no \\0 that bai: {exUniNoNull.Message}");
+                        }
+
+                        // C. Thu ASCII (co \0)
+                        try
+                        {
+                            Console.WriteLine("[DEBUG] Set PIN CNG (ASCII + \\0)...");
+                            SetCngPin(rsaCng.Key, _pin, false, true);
+                            byte[] sig = rsaCng.SignData(message, new HashAlgorithmName(_hashAlgorithm), RSASignaturePadding.Pkcs1);
+                            Console.WriteLine("[DEBUG] Ky bang RSACng (ASCII + \\0) thanh cong.");
+                            return sig;
+                        }
+                        catch (Exception exAscNull)
+                        {
+                            Console.WriteLine($"[DEBUG] ASCII + \\0 that bai: {exAscNull.Message}");
+                        }
+
+                        // D. Thu ASCII (khong \0)
+                        try
+                        {
+                            Console.WriteLine("[DEBUG] Set PIN CNG (ASCII, no \\0)...");
+                            SetCngPin(rsaCng.Key, _pin, false, false);
+                            byte[] sig = rsaCng.SignData(message, new HashAlgorithmName(_hashAlgorithm), RSASignaturePadding.Pkcs1);
+                            Console.WriteLine("[DEBUG] Ky bang RSACng (ASCII, no \\0) thanh cong.");
+                            return sig;
+                        }
+                        catch (Exception exAscNoNull)
+                        {
+                            Console.WriteLine($"[DEBUG] ASCII no \\0 that bai: {exAscNoNull.Message}");
+                        }
+                    }
+                }
+            }
+            catch (Exception exCngGeneric)
+            {
+                Console.WriteLine($"[DEBUG] Luong uu tien GetRSAPrivateKey loi generic: {exCngGeneric.Message}. Chuyen sang luong du phong CAPI...");
+            }
+        }
 
         CRYPT_KEY_PROV_INFO? provInfoOpt = GetKeyProvInfo();
         if (provInfoOpt == null)
@@ -1043,7 +1120,7 @@ public class CngUserSignature : IExternalSignature
                 {
                     if (!string.IsNullOrEmpty(_pin))
                     {
-                        SetCspPin(rsaCsp, _pin, true);
+                        SetCspPin(rsaCsp, _pin, true, true);
                     }
                     byte[] sig = rsaCsp.SignData(message, new HashAlgorithmName(_hashAlgorithm), RSASignaturePadding.Pkcs1);
                     Console.WriteLine("[DEBUG] Ky CSP NoPrompt (Unicode) thanh cong.");
@@ -1079,7 +1156,7 @@ public class CngUserSignature : IExternalSignature
                     {
                         if (!string.IsNullOrEmpty(_pin))
                         {
-                            SetCspPin(rsaCsp, _pin, false);
+                            SetCspPin(rsaCsp, _pin, false, true);
                         }
                         byte[] sig = rsaCsp.SignData(message, new HashAlgorithmName(_hashAlgorithm), RSASignaturePadding.Pkcs1);
                         Console.WriteLine("[DEBUG] Ky CSP NoPrompt (ASCII) thanh cong.");
@@ -1115,7 +1192,7 @@ public class CngUserSignature : IExternalSignature
                         {
                             if (!string.IsNullOrEmpty(_pin))
                             {
-                                SetCspPin(rsaCsp, _pin, true);
+                                SetCspPin(rsaCsp, _pin, true, true);
                             }
                             byte[] sig = rsaCsp.SignData(message, new HashAlgorithmName(_hashAlgorithm), RSASignaturePadding.Pkcs1);
                             Console.WriteLine("[DEBUG] Ky CSP Interactive + KeyPassword + CryptSetProvParam (Unicode) thanh cong.");
@@ -1151,7 +1228,7 @@ public class CngUserSignature : IExternalSignature
                             {
                                 if (!string.IsNullOrEmpty(_pin))
                                 {
-                                    SetCspPin(rsaCsp, _pin, false);
+                                    SetCspPin(rsaCsp, _pin, false, true);
                                 }
                                 byte[] sig = rsaCsp.SignData(message, new HashAlgorithmName(_hashAlgorithm), RSASignaturePadding.Pkcs1);
                                 Console.WriteLine("[DEBUG] Ky CSP Interactive + KeyPassword + CryptSetProvParam (ASCII) thanh cong.");
