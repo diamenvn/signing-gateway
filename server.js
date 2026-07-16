@@ -1543,6 +1543,11 @@ async function signPdfNative(cfg, pdfBase64, opts) {
       }
     }
 
+    const forceCng = opts.forceCng ?? cfg.forceCng ?? true;
+    if (forceCng) {
+      args.push('--force-cng');
+    }
+
     // 5. Thuc thi file .exe
     log('info', `Goi pdf-signer.exe de ky file. Serial: ${serial}, Pin: ${pin ? '***' : '(trong)'}`);
     

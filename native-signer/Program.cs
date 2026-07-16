@@ -17,6 +17,7 @@ class Program
 {
     static int Main(string[] args)
     {
+        System.Text.Encoding.RegisterProvider(System.Text.CodePagesEncodingProvider.Instance);
         Console.OutputEncoding = Encoding.UTF8;
         string input = null;
         string output = null;
@@ -38,6 +39,7 @@ class Program
         float smOffsetX = 0f;
         float smOffsetY = -45f;
 
+        bool forceCng = false;
         bool listOnly = false;
         bool testPkcs11 = false;
         bool xmlMode = false;
@@ -46,6 +48,7 @@ class Program
             if (args[i] == "--list") listOnly = true;
             else if (args[i] == "--test-pkcs11") testPkcs11 = true;
             else if (args[i] == "--xml") xmlMode = true;
+            else if (args[i] == "--force-cng") forceCng = true;
             else if (args[i] == "--input" && i + 1 < args.Length) input = args[++i];
             else if (args[i] == "--output" && i + 1 < args.Length) output = args[++i];
             else if (args[i] == "--serial" && i + 1 < args.Length) serial = args[++i];
@@ -256,7 +259,7 @@ class Program
             Console.WriteLine($"[INFO] Da tim thay chung thu: {cert.Subject}");
             Console.WriteLine($"[INFO] Dang tien hanh ky file PDF: {input} -> {output}...");
             SignPdf(input, output, cert, pin, page, llx, lly, urx, ury, desc, image, colorStr, tsize,
-                    signmark, smWidth, smHeight, smOffsetX, smOffsetY);
+                    signmark, smWidth, smHeight, smOffsetX, smOffsetY, forceCng);
             Console.WriteLine("[INFO] Ky so thanh cong!");
             return 0;
         }
@@ -321,7 +324,8 @@ class Program
         float smWidth,
         float smHeight,
         float smOffsetX,
-        float smOffsetY)
+        float smOffsetY,
+        bool forceCng)
     {
         Console.WriteLine("[DEBUG] Bat dau SignPdf...");
         // 1. Dung chuoi chung thu (cert chain)
@@ -342,14 +346,14 @@ class Program
         IExternalSignature externalSignature;
         string pkcs11DllPath = FindCompatiblePkcs11Dll(cert, pin);
 
-        if (pkcs11DllPath != null)
+        if (pkcs11DllPath != null && !forceCng)
         {
             Console.WriteLine($"[INFO] Phat hien driver PKCS#11 tuong thich: {pkcs11DllPath}. Chuyen sang luong ky PKCS#11 de ky an 100%...");
             externalSignature = new Pkcs11Signature(pkcs11DllPath, pin, "SHA256");
         }
         else
         {
-            Console.WriteLine("[INFO] Su dung luong ky mac dinh CAPI/CNG...");
+            Console.WriteLine("[INFO] Su dung luong ky mac dinh CAPI/CNG (Force CNG/CAPI: " + forceCng + ")...");
             externalSignature = new CngUserSignature(cert, pin, "SHA256");
         }
 
