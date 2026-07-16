@@ -1017,9 +1017,10 @@ public class CngUserSignature : IExternalSignature
             Console.WriteLine("[DEBUG] Uu tien luong CSP cho khoa Type > 0...");
             
             // A. Thu voi NoPrompt (Silent) + KeyPassword + CryptSetProvParam truoc
+            // A1. Thu voi NoPrompt (Silent) + KeyPassword + CryptSetProvParam (Unicode)
             try
             {
-                Console.WriteLine("[DEBUG] Thu CSP voi NoPrompt + KeyPassword + CryptSetProvParam (ASCII)...");
+                Console.WriteLine("[DEBUG] Thu CSP voi NoPrompt + KeyPassword + CryptSetProvParam (Unicode)...");
                 CspParameters cspParamsSilent = new CspParameters
                 {
                     ProviderName = provInfo.pwszProvName,
@@ -1042,27 +1043,26 @@ public class CngUserSignature : IExternalSignature
                 {
                     if (!string.IsNullOrEmpty(_pin))
                     {
-                        SetCspPin(rsaCsp, _pin, false);
+                        SetCspPin(rsaCsp, _pin, true);
                     }
                     byte[] sig = rsaCsp.SignData(message, new HashAlgorithmName(_hashAlgorithm), RSASignaturePadding.Pkcs1);
-                    Console.WriteLine("[DEBUG] Ky CSP NoPrompt (ASCII) thanh cong.");
+                    Console.WriteLine("[DEBUG] Ky CSP NoPrompt (Unicode) thanh cong.");
                     return sig;
                 }
             }
-            catch (CryptographicException ex) when (ex.Message.Contains("silent") || ex.Message.Contains("0x80090022") || ex.Message.Contains("0x8009001A"))
+            catch (Exception exUnicodeSilent)
             {
-                Console.WriteLine("[DEBUG] Ky CSP NoPrompt that bai (silent). Thu lai voi luong CSP tuong tac (khong NoPrompt) + KeyPassword + CryptSetProvParam...");
+                Console.WriteLine($"[DEBUG] Ky CSP NoPrompt (Unicode) that bai: {exUnicodeSilent.Message}. Thu tiep voi NoPrompt (ASCII)...");
                 
-                // B. Thu voi tuong tac (khong NoPrompt) + KeyPassword + CryptSetProvParam
-                // Neu PIN dung, driver se tu dong dung PIN va ky ngam ma khong hien bat ky UI nao
+                // A2. Thu voi NoPrompt (Silent) + KeyPassword + CryptSetProvParam (ASCII)
                 try
                 {
-                    CspParameters cspParamsInteractive = new CspParameters
+                    CspParameters cspParamsSilent = new CspParameters
                     {
                         ProviderName = provInfo.pwszProvName,
                         ProviderType = (int)provInfo.dwProvType,
                         KeyContainerName = provInfo.pwszContainerName,
-                        Flags = CspProviderFlags.UseExistingKey // KHONG dung NoPrompt
+                        Flags = CspProviderFlags.UseExistingKey | CspProviderFlags.NoPrompt
                     };
 
                     if (!string.IsNullOrEmpty(_pin))
@@ -1072,24 +1072,98 @@ public class CngUserSignature : IExternalSignature
                         {
                             securePin.AppendChar(c);
                         }
-                        cspParamsInteractive.KeyPassword = securePin;
+                        cspParamsSilent.KeyPassword = securePin;
                     }
 
-                    using (var rsaCsp = new RSACryptoServiceProvider(cspParamsInteractive))
+                    using (var rsaCsp = new RSACryptoServiceProvider(cspParamsSilent))
                     {
                         if (!string.IsNullOrEmpty(_pin))
                         {
                             SetCspPin(rsaCsp, _pin, false);
                         }
                         byte[] sig = rsaCsp.SignData(message, new HashAlgorithmName(_hashAlgorithm), RSASignaturePadding.Pkcs1);
-                        Console.WriteLine("[DEBUG] Ky CSP Interactive + KeyPassword + CryptSetProvParam (ASCII) thanh cong.");
+                        Console.WriteLine("[DEBUG] Ky CSP NoPrompt (ASCII) thanh cong.");
                         return sig;
                     }
                 }
-                catch (Exception innerEx)
+                catch (Exception exAsciiSilent)
                 {
-                    Console.WriteLine($"[DEBUG] Thu CSP Interactive loi: {innerEx.Message}");
-                    throw;
+                    Console.WriteLine($"[DEBUG] Ky CSP NoPrompt (ASCII) that bai: {exAsciiSilent.Message}. Thu lai voi luong CSP tuong tac (Unicode)...");
+                    
+                    // B1. Thu voi tuong tac (khong NoPrompt) + KeyPassword + CryptSetProvParam (Unicode)
+                    try
+                    {
+                        CspParameters cspParamsInteractive = new CspParameters
+                        {
+                            ProviderName = provInfo.pwszProvName,
+                            ProviderType = (int)provInfo.dwProvType,
+                            KeyContainerName = provInfo.pwszContainerName,
+                            Flags = CspProviderFlags.UseExistingKey
+                        };
+
+                        if (!string.IsNullOrEmpty(_pin))
+                        {
+                            SecureString securePin = new SecureString();
+                            foreach (char c in _pin)
+                            {
+                                securePin.AppendChar(c);
+                            }
+                            cspParamsInteractive.KeyPassword = securePin;
+                        }
+
+                        using (var rsaCsp = new RSACryptoServiceProvider(cspParamsInteractive))
+                        {
+                            if (!string.IsNullOrEmpty(_pin))
+                            {
+                                SetCspPin(rsaCsp, _pin, true);
+                            }
+                            byte[] sig = rsaCsp.SignData(message, new HashAlgorithmName(_hashAlgorithm), RSASignaturePadding.Pkcs1);
+                            Console.WriteLine("[DEBUG] Ky CSP Interactive + KeyPassword + CryptSetProvParam (Unicode) thanh cong.");
+                            return sig;
+                        }
+                    }
+                    catch (Exception exUnicodeInteractive)
+                    {
+                        Console.WriteLine($"[DEBUG] Ky CSP Interactive (Unicode) that bai: {exUnicodeInteractive.Message}. Thu tiep voi Interactive (ASCII)...");
+                        
+                        // B2. Thu voi tuong tac (khong NoPrompt) + KeyPassword + CryptSetProvParam (ASCII)
+                        try
+                        {
+                            CspParameters cspParamsInteractive = new CspParameters
+                            {
+                                ProviderName = provInfo.pwszProvName,
+                                ProviderType = (int)provInfo.dwProvType,
+                                KeyContainerName = provInfo.pwszContainerName,
+                                Flags = CspProviderFlags.UseExistingKey
+                            };
+
+                            if (!string.IsNullOrEmpty(_pin))
+                            {
+                                SecureString securePin = new SecureString();
+                                foreach (char c in _pin)
+                                {
+                                    securePin.AppendChar(c);
+                                }
+                                cspParamsInteractive.KeyPassword = securePin;
+                            }
+
+                            using (var rsaCsp = new RSACryptoServiceProvider(cspParamsInteractive))
+                            {
+                                if (!string.IsNullOrEmpty(_pin))
+                                {
+                                    SetCspPin(rsaCsp, _pin, false);
+                                }
+                                byte[] sig = rsaCsp.SignData(message, new HashAlgorithmName(_hashAlgorithm), RSASignaturePadding.Pkcs1);
+                                Console.WriteLine("[DEBUG] Ky CSP Interactive + KeyPassword + CryptSetProvParam (ASCII) thanh cong.");
+                                return sig;
+                            }
+                        }
+                        catch (Exception exAsciiInteractive)
+                        {
+                            Console.WriteLine($"[DEBUG] Ky CSP Interactive (ASCII) that bai: {exAsciiInteractive.Message}");
+                            throw;
+                        }
+                    }
                 }
             }
         }
