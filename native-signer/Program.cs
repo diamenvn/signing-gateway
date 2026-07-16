@@ -79,9 +79,33 @@ class Program
                 {
                     foreach (var cert in store.Certificates)
                     {
-                        string serialNumber = cert.SerialNumber.Replace(" ", "").Replace(":", "").ToUpper();
-                        string cn = GetCertCN(cert);
-                        Console.WriteLine($"SERIAL:{serialNumber}|CN:{cn}|HAS_KEY:{cert.HasPrivateKey}");
+                        if (!cert.HasPrivateKey) continue;
+                        
+                        try
+                        {
+                            using (var rsa = cert.GetRSAPrivateKey())
+                            {
+                                if (rsa == null) continue;
+                                
+                                // Ép buộc truy cập khóa vật lý để kích hoạt kiểm tra phần cứng
+                                if (rsa is RSACng rsaCng)
+                                {
+                                    var k = rsaCng.Key;
+                                }
+                                else if (rsa is RSACryptoServiceProvider rsaCsp)
+                                {
+                                    var k = rsaCsp.CspKeyContainerInfo;
+                                }
+                            }
+                            
+                            string serialNumber = cert.SerialNumber.Replace(" ", "").Replace(":", "").ToUpper();
+                            string cn = GetCertCN(cert);
+                            Console.WriteLine($"SERIAL:{serialNumber}|CN:{cn}|HAS_KEY:true");
+                        }
+                        catch
+                        {
+                            // Lỗi xảy ra tức là USB Token chứa khóa này đang bị rút ra, bỏ qua!
+                        }
                     }
                 }
                 finally
