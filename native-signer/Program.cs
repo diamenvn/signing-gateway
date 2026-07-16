@@ -87,14 +87,67 @@ class Program
                             {
                                 if (rsa == null) continue;
                                 
-                                // Ép buộc truy cập khóa vật lý để kích hoạt kiểm tra phần cứng
+                                // 1. Chỉ lọc các chứng chỉ nằm trong thiết bị phần cứng (USB Token / Smart Card)
+                                if (!IsHardwareKey(rsa)) continue;
+                                
+                                // 2. Kiểm tra xem thiết bị phần cứng có đang kết nối thực tế hay không
                                 if (rsa is RSACng rsaCng)
                                 {
-                                    var k = rsaCng.Key;
+                                    // Gán chế độ silent
+                                    try
+                                    {
+                                        CngProperty silentProp = new CngProperty("Silent", new byte[] { 1, 0, 0, 0 }, CngPropertyOptions.None);
+                                        rsaCng.Key.SetProperty(silentProp);
+                                    }
+                                    catch {}
+                                    
+                                    try
+                                    {
+                                        byte[] dummy = { 0x01 };
+                                        rsaCng.SignData(dummy, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+                                    }
+                                    catch (CryptographicException ex)
+                                    {
+                                        string msg = ex.Message.ToLower();
+                                        int hr = ex.HResult;
+                                        // Nếu là lỗi đòi PIN hoặc hủy giao diện -> Thiết bị đang cắm thực tế!
+                                        bool isPluggedIn = msg.Contains("silent") || msg.Contains("pin") || msg.Contains("cancelled") ||
+                                                           hr == -2146893790 || hr == -2146893779;
+                                        if (!isPluggedIn) continue; // USB đã rút, bỏ qua!
+                                    }
                                 }
                                 else if (rsa is RSACryptoServiceProvider rsaCsp)
                                 {
-                                    var k = rsaCsp.CspKeyContainerInfo;
+                                    // Đối với CSP truyền thống, lấy CspKeyContainerInfo
+                                    var info = rsaCsp.CspKeyContainerInfo;
+                                    if (info.HardwareDevice)
+                                    {
+                                        // Thử ký một mẫu nhỏ để kích hoạt kiểm tra kết nối vật lý
+                                        try
+                                        {
+                                            // Ép chế độ NoPrompt (Silent)
+                                            CspParameters silentParams = new CspParameters
+                                            {
+                                                ProviderName = info.ProviderName,
+                                                ProviderType = info.ProviderKind,
+                                                KeyContainerName = info.KeyContainerName,
+                                                Flags = CspProviderFlags.UseExistingKey | CspProviderFlags.NoPrompt
+                                            };
+                                            using (var testCsp = new RSACryptoServiceProvider(silentParams))
+                                            {
+                                                byte[] dummy = { 0x01 };
+                                                testCsp.SignData(dummy, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+                                            }
+                                        }
+                                        catch (CryptographicException ex)
+                                        {
+                                            string msg = ex.Message.ToLower();
+                                            int hr = ex.HResult;
+                                            bool isPluggedIn = msg.Contains("silent") || msg.Contains("pin") || msg.Contains("cancelled") ||
+                                                               hr == -2146893790 || hr == -2146893779;
+                                            if (!isPluggedIn) continue;
+                                        }
+                                    }
                                 }
                             }
                             
@@ -104,7 +157,7 @@ class Program
                         }
                         catch
                         {
-                            // Lỗi xảy ra tức là USB Token chứa khóa này đang bị rút ra, bỏ qua!
+                            // Bỏ qua nếu lỗi
                         }
                     }
                 }
@@ -658,6 +711,35 @@ class Program
         {
             if (rsaKey != null) rsaKey.Dispose();
         }
+    }
+
+    private static bool IsHardwareKey(RSA rsa)
+    {
+        try
+        {
+            if (rsa is RSACryptoServiceProvider rsaCsp)
+            {
+                var info = rsaCsp.CspKeyContainerInfo;
+                if (info.HardwareDevice) return true;
+                
+                string provName = info.ProviderName.ToLower();
+                if (provName.Contains("smart card") || provName.Contains("token") || provName.Contains("ca") || provName.Contains("csp"))
+                {
+                    if (!provName.Contains("software") && !provName.Contains("strong") && !provName.Contains("enhanced") && !provName.Contains("base"))
+                        return true;
+                }
+            }
+            else if (rsa is RSACng rsaCng)
+            {
+                string provName = rsaCng.Key.Provider.Provider.ToLower();
+                if (provName.Contains("software")) return false;
+                
+                if (provName.Contains("smart card") || provName.Contains("token") || provName.Contains("ca") || provName.Contains("ksp"))
+                    return true;
+            }
+        }
+        catch {}
+        return false;
     }
 
     static string GetCertCN(X509Certificate2 cert)
