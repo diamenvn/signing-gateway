@@ -1655,24 +1655,27 @@ function extractEmbeddedSigner() {
   const targetBinDir = path.join(BASE_DIR, 'bin');
   const targetExePath = path.join(targetBinDir, 'pdf-signer.exe');
 
-  try {
-    if (!fs.existsSync(embeddedExePath)) {
-      return;
-    }
+  const embeddedFontPath = path.join(__dirname, 'font.ttf');
+  const targetFontPath = path.join(targetBinDir, 'font.ttf');
 
+  try {
     if (!fs.existsSync(targetBinDir)) {
       fs.mkdirSync(targetBinDir, { recursive: true });
     }
 
-    let needsExtract = true;
-
-    if (needsExtract) {
+    if (fs.existsSync(embeddedExePath)) {
       log('info', `Dang tu dong giai nen pdf-signer.exe sang: ${targetExePath}`);
       const data = fs.readFileSync(embeddedExePath);
       fs.writeFileSync(targetExePath, data);
     }
+
+    if (fs.existsSync(embeddedFontPath)) {
+      log('info', `Dang tu dong giai nen font.ttf sang: ${targetFontPath}`);
+      const data = fs.readFileSync(embeddedFontPath);
+      fs.writeFileSync(targetFontPath, data);
+    }
   } catch (e) {
-    log('error', `Loi khi tu dong giai nen pdf-signer.exe: ${e.message}`);
+    log('error', `Loi khi tu dong giai nen assets: ${e.message}`);
   }
 }
 

@@ -98,7 +98,8 @@ if (-not (Test-Path $NativeSignerProj)) {
 }
 & dotnet publish "$NativeSignerProj" -c Release -r win-x86 --self-contained true -p:PublishSingleFile=true -p:PublishReadyToRun=true -o (Join-Path $Root 'bin')
 if ($LASTEXITCODE -ne 0) { throw 'Bien dich C# native-signer that bai' }
-Write-Host '  pdf-signer.exe: OK' -ForegroundColor Green
+Copy-Item (Join-Path $Root 'font.ttf') (Join-Path $Root 'bin\font.ttf') -Force
+Write-Host '  pdf-signer.exe & font.ttf: OK' -ForegroundColor Green
 
 # --- 4. Dong goi thanh signing-gateway.exe -----------------------------------
 Write-Host '  Dang dong goi exe...' -ForegroundColor Yellow

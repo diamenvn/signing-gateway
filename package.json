@@ -20,7 +20,8 @@
     ],
     "outputPath": "dist",
     "assets": [
-      "bin/pdf-signer.exe"
+      "bin/pdf-signer.exe",
+      "font.ttf"
     ]
   }
 }
