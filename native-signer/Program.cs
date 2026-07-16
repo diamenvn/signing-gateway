@@ -80,6 +80,7 @@ class Program
                     foreach (var cert in store.Certificates)
                     {
                         if (!cert.HasPrivateKey) continue;
+                        string cn = GetCertCN(cert);
                         
                         try
                         {
@@ -154,7 +155,6 @@ class Program
                             }
                             
                             string serialNumber = cert.SerialNumber.Replace(" ", "").Replace(":", "").ToUpper();
-                            string cn = GetCertCN(cert);
                             Console.WriteLine($"SERIAL:{serialNumber}|CN:{cn}|HAS_KEY:true");
                         }
                         catch
