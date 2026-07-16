@@ -38,7 +38,7 @@ Name: "en"; MessagesFile: "compiler:Default.isl"
 
 [Files]
 Source: "..\dist\{#ExeName}"; DestDir: "{app}"; Flags: ignoreversion
-Source: "..\README.md";       DestDir: "{app}"; Flags: ignoreversion isreadme
+Source: "..\DIEU_KHOAN.txt";   DestDir: "{app}"; Flags: ignoreversion isreadme
 ; cloudflared.exe la TUY CHON
 Source: "cloudflared.exe";    DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 ; license.txt: dontcopy = wizard doc luc cai, KHONG cai vao {app}
