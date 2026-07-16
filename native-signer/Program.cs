@@ -129,7 +129,7 @@ class Program
                                             CspParameters silentParams = new CspParameters
                                             {
                                                 ProviderName = info.ProviderName,
-                                                ProviderType = info.ProviderKind,
+                                                ProviderType = info.ProviderType,
                                                 KeyContainerName = info.KeyContainerName,
                                                 Flags = CspProviderFlags.UseExistingKey | CspProviderFlags.NoPrompt
                                             };
