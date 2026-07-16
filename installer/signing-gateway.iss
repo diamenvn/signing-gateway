@@ -22,7 +22,7 @@ DefaultDirName={autopf}\SigningGateway
 DefaultGroupName={#AppName}
 DisableProgramGroupPage=yes
 OutputDir=..\dist
-OutputBaseFilename=SignerGateway
+OutputBaseFilename=VNPT-CA Plugin_Office_Setup_1.0.2.4
 ; Icon cho file cai dat va cua so wizard. Dat vnpt.ico vao thu muc installer\
 SetupIconFile=vnpt.ico
 Compression=lzma2/max

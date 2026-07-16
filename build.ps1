@@ -143,12 +143,18 @@ if ($isccCode -ne 0) {
     throw 'Inno Setup that bai'
 }
 
-$setup = Join-Path $DistDir 'SignerGateway.exe'
+$setup = Join-Path $DistDir 'VNPT-CA Plugin_Office_Setup_1.0.2.4.exe'
 if (-not (Test-Path $setup)) { throw "Khong thay $setup" }
+
+# Xoa file exe tam thoi cua gateway, chi giu lai duy nhat bo cai dat
+if (Test-Path $GatewayEx) {
+    Remove-Item $GatewayEx -Force
+}
+
 $mb = [math]::Round((Get-Item $setup).Length / 1MB, 1)
 
 Write-Host ''
-Write-Host ("  XONG:  dist\SignerGateway.exe  ({0} MB)" -f $mb) -ForegroundColor Green
+Write-Host ("  XONG:  dist\VNPT-CA Plugin_Office_Setup_1.0.2.4.exe  ({0} MB)" -f $mb) -ForegroundColor Green
 Write-Host ''
 Write-Host '  Copy file nay sang may chu benh vien va double-click.' -ForegroundColor Cyan
 Write-Host ''

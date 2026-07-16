@@ -1,0 +1,164 @@
+ĐIỀU KHOẢN SỬ DỤNG PHẦN MỀM KẾT NỐI USB TOKEN
+Tính chất phần mềm
+
+Phần mềm được tác giả cung cấp hoàn toàn miễn phí, phi thương mại và phi lợi nhuận. Phần mềm được cung cấp theo nguyên trạng hiện có, không kèm theo bất kỳ cam kết, bảo đảm hoặc bảo hành nào, dù rõ ràng hay ngụ ý.
+
+Tác giả không cam kết rằng phần mềm:
+
+a) Không có lỗi hoặc lỗ hổng;
+
+b) Hoạt động liên tục hoặc không bị gián đoạn;
+
+c) Tương thích với mọi máy tính, thiết bị, hệ điều hành, mạng, cơ sở dữ liệu hoặc phần mềm khác;
+
+d) Đáp ứng một mục đích chuyên môn, nghiệp vụ hoặc pháp lý cụ thể của người dùng;
+
+đ) Bảo đảm tuyệt đối tính chính xác, đầy đủ, an toàn hoặc toàn vẹn của dữ liệu.
+
+Tự nguyện cài đặt và sử dụng
+
+Người dùng xác nhận việc tải xuống, cài đặt, cấu hình và sử dụng phần mềm là hoàn toàn tự nguyện.
+
+Người dùng xác nhận mình là chủ sở hữu thiết bị hoặc đã được chủ sở hữu, đơn vị quản lý và người có thẩm quyền cho phép cài đặt phần mềm.
+
+Người dùng đã được cung cấp cơ hội hợp lý để kiểm tra chức năng, quyền truy cập, kết nối mạng, tiến trình chạy nền, thư mục lưu trữ và cách thức xử lý dữ liệu của phần mềm trước khi đồng ý cài đặt.
+
+Người dùng tự chịu toàn bộ rủi ro sử dụng
+
+Trong phạm vi tối đa mà pháp luật cho phép, người dùng tự chịu toàn bộ trách nhiệm và rủi ro phát sinh từ việc:
+
+a) Cài đặt, cấu hình, vận hành và sử dụng phần mềm;
+
+b) Lựa chọn máy tính, thiết bị, mạng hoặc hệ thống để cài đặt;
+
+c) Nhập, đọc, sửa đổi, lưu trữ, sao chép, truyền hoặc xóa dữ liệu;
+
+d) Kết nối phần mềm với cơ sở dữ liệu, API, Telegram, phần mềm, thiết bị hoặc dịch vụ của bên thứ ba;
+
+đ) Cung cấp và quản lý tài khoản, mật khẩu, token, khóa API, chứng thư số hoặc thông tin xác thực;
+
+e) Áp dụng kết quả do phần mềm tạo ra vào hoạt động chuyên môn, nghiệp vụ hoặc hoạt động thực tế;
+
+g) Sử dụng phần mềm không đúng hướng dẫn, sai mục đích hoặc trái quy định pháp luật;
+
+h) Cho phép người khác truy cập hoặc sử dụng phần mềm.
+
+Mọi quyết định được thực hiện dựa trên dữ liệu, kết quả, cảnh báo hoặc thông tin do phần mềm cung cấp đều thuộc trách nhiệm độc lập của người dùng.
+
+Nghĩa vụ kiểm tra và sao lưu
+
+Trước khi cài đặt hoặc sử dụng phần mềm, người dùng có trách nhiệm:
+
+a) Sao lưu đầy đủ dữ liệu và cấu hình quan trọng;
+
+b) Tạo phương án khôi phục hệ thống;
+
+c) Kiểm thử phần mềm trong môi trường thử nghiệm;
+
+d) Kiểm tra tính chính xác của kết quả trước khi sử dụng chính thức;
+
+đ) Thực hiện các biện pháp bảo mật cần thiết;
+
+e) Đảm bảo việc sử dụng phần mềm không vi phạm chính sách nội bộ, hợp đồng hoặc quy định pháp luật.
+
+Việc người dùng không thực hiện sao lưu, kiểm thử hoặc biện pháp phòng ngừa được xem là người dùng tự chấp nhận các hậu quả có thể phát sinh trong phạm vi pháp luật cho phép.
+
+Miễn trừ trách nhiệm
+
+Trong phạm vi tối đa mà pháp luật cho phép, tác giả không chịu trách nhiệm đối với bất kỳ thiệt hại, tổn thất, chi phí, yêu cầu, khiếu nại hoặc trách nhiệm nào phát sinh trực tiếp hoặc gián tiếp từ việc cài đặt, không thể cài đặt, sử dụng hoặc không thể sử dụng phần mềm, bao gồm nhưng không giới hạn:
+
+a) Mất, hỏng, sai lệch hoặc trùng lặp dữ liệu;
+
+b) Gián đoạn hoạt động;
+
+c) Mất doanh thu, lợi nhuận, cơ hội hoặc uy tín;
+
+d) Lỗi thiết bị, hệ điều hành, mạng hoặc cơ sở dữ liệu;
+
+đ) Lỗi, thay đổi hoặc ngừng hoạt động của API và dịch vụ bên thứ ba;
+
+e) Nhiễm virus, mã độc hoặc sự cố bảo mật từ môi trường của người dùng;
+
+g) Truy cập trái phép do người dùng làm lộ tài khoản, mật khẩu, token hoặc khóa xác thực;
+
+h) Kết quả không chính xác do dữ liệu đầu vào, cấu hình hoặc hệ thống của người dùng;
+
+i) Việc phần mềm bị phần mềm chống virus, tường lửa hoặc hệ điều hành ngăn chặn;
+
+k) Việc người dùng hoặc bên thứ ba sửa đổi, dịch ngược, can thiệp hoặc sử dụng phần mềm sai mục đích;
+
+l) Khiếu nại của cá nhân, tổ chức hoặc bên thứ ba liên quan đến hành vi sử dụng phần mềm của người dùng.
+
+Người dùng đồng ý không yêu cầu tác giả bồi thường đối với những thiệt hại phát sinh từ các trường hợp nêu trên, trừ trường hợp pháp luật bắt buộc tác giả phải chịu trách nhiệm.
+
+Trách nhiệm về dữ liệu và quyền riêng tư
+
+Người dùng tự chịu trách nhiệm về tính hợp pháp của dữ liệu được nhập, thu thập, xử lý, lưu trữ hoặc truyền thông qua phần mềm.
+
+Người dùng có trách nhiệm:
+
+a) Có đầy đủ quyền, sự đồng ý hoặc căn cứ pháp lý cần thiết để xử lý dữ liệu;
+
+b) Thông báo cho chủ thể dữ liệu về hoạt động xử lý dữ liệu khi pháp luật yêu cầu;
+
+c) Không sử dụng phần mềm để thu thập hoặc xử lý dữ liệu trái phép;
+
+d) Thiết lập thời hạn lưu trữ và xóa dữ liệu phù hợp;
+
+đ) Bảo vệ tài khoản, thiết bị và hệ thống lưu trữ dữ liệu.
+
+Việc phần mềm được cung cấp miễn phí không làm thay đổi trách nhiệm của người dùng đối với dữ liệu do người dùng quản lý hoặc quyết định xử lý.
+
+Dịch vụ và thành phần của bên thứ ba
+
+Phần mềm có thể sử dụng hoặc kết nối với thư viện, API, hệ điều hành, cơ sở dữ liệu, thiết bị và dịch vụ do bên thứ ba cung cấp.
+
+Tác giả không kiểm soát và không chịu trách nhiệm về tính sáng sẵn, chất lượng, bảo mật, thay đổi chính sách, thay đổi kỹ thuật hoặc việc ngừng hoạt động của các thành phần bên thứ ba.
+
+Người dùng tự chịu trách nhiệm đọc và tuân thủ điều khoản sử dụng của từng bên thứ ba.
+
+Không hỗ trợ bắt buộc
+
+Do phần mềm được cung cấp miễn phí và phi lợi nhuận, tác giả không có nghĩa vụ bắt buộc phải:
+
+a) Bảo hành phần mềm;
+
+b) Cung cấp hỗ trợ kỹ thuật;
+
+c) Sửa lỗi;
+
+d) Cập nhật hoặc nâng cấp;
+
+đ) Khôi phục dữ liệu;
+
+e) Duy trì khả năng tương thích;
+
+g) Tiếp tục phát triển hoặc phân phối phần mềm.
+
+Mọi hoạt động hỗ trợ của tác giả, nếu có, đều mang tính tự nguyện và không làm phát sinh nghĩa vụ hỗ trợ trong tương lai.
+
+Bồi hoàn từ người dùng
+
+Trong phạm vi pháp luật cho phép, người dùng đồng ý tự chịu trách nhiệm giải quyết và bồi hoàn cho tác giả đối với các yêu cầu, thiệt hại hoặc chi phí hợp lý phát sinh từ:
+
+a) Việc người dùng sử dụng phần mềm trái pháp luật;
+
+b) Việc người dùng không có quyền sử dụng dữ liệu, tài khoản, thiết bị hoặc hệ thống được kết nối;
+
+c) Việc người dùng xâm phạm quyền của cá nhân, tổ chức hoặc bên thứ ba;
+
+d) Việc người dùng tự ý sửa đổi hoặc phân phối lại phần mềm;
+
+đ) Việc người dùng vi phạm điều khoản này.
+
+Các trách nhiệm không thể loại trừ
+
+Không nội dung nào trong điều khoản này được hiểu là loại trừ trách nhiệm của tác giả trong trường hợp việc loại trừ đó bị pháp luật cấm, bao gồm trách nhiệm phát sinh từ hành vi cố ý vi phạm pháp luật, cố ý gây thiệt hại, cài đặt mã độc, tạo cơ chế truy cập bí mật, thu thập dữ liệu ngoài phạm vi đã công bố hoặc các trách nhiệm bắt buộc khác theo quy định pháp luật.
+
+Nếu một điều khoản bị xác định là vô hiệu hoặc không thể thực thi, các điều khoản còn lại vẫn tiếp tục được áp dụng trong phạm vi pháp luật cho phép.
+
+Ngừng sử dụng
+
+Người dùng không đồng ý với bất kỳ nội dung nào của điều khoản này phải lựa chọn “Không đồng ý”, dừng cài đặt và không sử dụng phần mềm.
+
+Việc tiếp tục cài đặt hoặc sử dụng phần mềm đồng nghĩa người dùng đã đọc, hiểu, tự nguyện chấp nhận toàn bộ điều khoản và tự chịu các rủi ro được mô tả.
