@@ -1680,16 +1680,20 @@ function extractEmbeddedSigner() {
       fs.mkdirSync(targetBinDir, { recursive: true });
     }
 
-    if (fs.existsSync(embeddedExePath)) {
-      log('info', `Dang tu dong giai nen pdf-signer.exe sang: ${targetExePath}`);
+    try {
       const data = fs.readFileSync(embeddedExePath);
+      log('info', `Dang tu dong giai nen pdf-signer.exe sang: ${targetExePath}`);
       fs.writeFileSync(targetExePath, data);
+    } catch (e) {
+      log('warn', `Khong the doc/ghi file embedded pdf-signer.exe: ${e.message}`);
     }
 
-    if (fs.existsSync(embeddedFontPath)) {
-      log('info', `Dang tu dong giai nen font.ttf sang: ${targetFontPath}`);
+    try {
       const data = fs.readFileSync(embeddedFontPath);
+      log('info', `Dang tu dong giai nen font.ttf sang: ${targetFontPath}`);
       fs.writeFileSync(targetFontPath, data);
+    } catch (e) {
+      log('warn', `Khong the doc/ghi file embedded font.ttf: ${e.message}`);
     }
   } catch (e) {
     log('error', `Loi khi tu dong giai nen assets: ${e.message}`);

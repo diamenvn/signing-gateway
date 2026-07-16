@@ -534,32 +534,32 @@ class Program
                 bf = BaseFont.CreateFont(BaseFont.HELVETICA, BaseFont.CP1252, BaseFont.NOT_EMBEDDED);
             }
 
+            float textLeft = 3;
             if (hasImage)
             {
                 try
                 {
                     iTextSharp.text.Image img = iTextSharp.text.Image.GetInstance(imagePath);
-                    img.ScaleToFit(w / 2 - 6, h - 6);
-                    float imgX = (w / 2 - img.ScaledWidth) / 2;
-                    float imgY = (h - img.ScaledHeight) / 2;
+                    // Anh chiem toi da 40% chieu rong, co dan theo chieu cao o ky
+                    float maxImgW = w * 0.4f;
+                    img.ScaleToFit(maxImgW, h - 6);
+                    
+                    float imgX = 5; // Cach trai 5px
+                    float imgY = (h - img.ScaledHeight) / 2; // Can giua doc
                     img.SetAbsolutePosition(imgX, imgY);
                     layer2.AddImage(img);
+                    
+                    textLeft = imgX + img.ScaledWidth + 8; // Chu bat dau sat ngay sau anh (cach anh 8px)
                 }
                 catch (Exception imgEx)
                 {
                     Console.WriteLine($"[DEBUG] Loi ve anh vao Layer 2: {imgEx.Message}");
+                    textLeft = 3;
                 }
             }
 
             Font font = new Font(bf, tsize, Font.NORMAL, textColor);
             ColumnText ct = new ColumnText(layer2);
-            
-            float textLeft = 3;
-            if (hasImage)
-            {
-                textLeft = (w / 2) + 3;
-            }
-
             float leading = tsize * 1.25f;
             ct.SetSimpleColumn(new Phrase(text, font), textLeft, 0, w - 3, h - 2, leading, Element.ALIGN_LEFT);
             ct.Go();

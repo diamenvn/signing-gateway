@@ -16,4 +16,10 @@
     <PackageReference Include="System.Security.Cryptography.Xml" Version="8.0.0" />
   </ItemGroup>
 
+  <ItemGroup>
+    <None Include="..\font.ttf">
+      <Link>font.ttf</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
 </Project>
