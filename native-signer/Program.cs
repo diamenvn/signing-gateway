@@ -985,6 +985,16 @@ public class CngUserSignature : IExternalSignature
         }
     }
 
+    private void SetCngSilent(CngKey cngKey)
+    {
+        try
+        {
+            CngProperty silentProp = new CngProperty("Silent", new byte[] { 1, 0, 0, 0 }, CngPropertyOptions.None);
+            cngKey.SetProperty(silentProp);
+        }
+        catch {}
+    }
+
     private void SetCngPin(CngKey cngKey, string pin, bool isUnicode, bool withNull)
     {
         string finalPin = withNull ? pin + '\0' : pin;
@@ -1008,6 +1018,7 @@ public class CngUserSignature : IExternalSignature
                     if (rsaCng != null)
                     {
                         Console.WriteLine("[DEBUG] GetRSAPrivateKey la RSACng. Dang thu thiet lap PIN qua CNG...");
+                        SetCngSilent(rsaCng.Key);
                         
                         // A. Thu Unicode (co \0)
                         try
