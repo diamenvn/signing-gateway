@@ -1815,19 +1815,21 @@ td{padding:7px 4px;border-bottom:1px solid #eee}td:first-child{color:#777;width:
       /* ---- Tu day tro di: bat buoc co token do backend HIS4 cap ---- */
       const auth = req.headers.authorization || '';
 
+      const errorStatus = 500;
+
       let claim;
       if (cfg.devMode) {
         // CHE DO DEV: bo qua xac thuc token de test bang Postman/curl.
         claim = { sub: 'dev-user', name: 'Dev Mode' };
       } else {
-        if (!auth.startsWith('Bearer ')) return json(res, 401, { error: 'thieu token' });
+        if (!auth.startsWith('Bearer ')) return json(res, errorStatus, { error: 'thieu token' });
         // Chi lenh ky moi tieu thu jti. Doc trang thai/ket qua dung lai token duoc.
         const isSignAction = (req.method === 'POST' && p === '/v2/sign');
         try {
           claim = verifyHisToken(cfg, auth.slice(7), isSignAction);
         } catch (e) {
           audit(cfg, { type: 'auth.fail', reason: e.message, path: p });
-          return json(res, 401, { error: e.message });
+          return json(res, errorStatus, { error: e.message });
         }
       }
 
