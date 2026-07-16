@@ -1757,15 +1757,12 @@ function makeHandler(cfg, plugin, queue, tunnel, lock, mutex) {
     const origin = req.headers.origin;
 
     /* ---- CORS + Private Network Access ---- */
-    if (origin && cfg.allowedOrigins.includes(origin)) {
+    if (origin) {
       res.setHeader('Access-Control-Allow-Origin', origin);
       res.setHeader('Vary', 'Origin');
       res.setHeader('Access-Control-Allow-Private-Network', 'true');
     }
     if (req.method === 'OPTIONS') {
-      if (!origin || !cfg.allowedOrigins.includes(origin)) {
-        return json(res, 403, { error: 'origin khong duoc phep' });
-      }
       res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
       res.setHeader('Access-Control-Allow-Headers', 'content-type,authorization');
       res.setHeader('Access-Control-Max-Age', '86400');
