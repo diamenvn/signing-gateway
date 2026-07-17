@@ -800,6 +800,7 @@ class Tunnel {
     this.retries = 0;
     this.stopping = false;
     this.mode = this.cfg.token ? 'named' : 'quick';
+    this.reconnectTimer = null;
   }
 
   /** Tim cloudflared.exe: config -> canh file exe -> PATH he thong */
@@ -809,6 +810,27 @@ class Tunnel {
     const beside = path.join(APP_DIR, name);
     if (fs.existsSync(beside)) return beside;
     return name; // thu tim trong PATH
+  }
+
+  scheduleReconnect() {
+    if (this.reconnectTimer) return;
+    log('warn', 'Phat hien loi ket noi tunnel. Se tu dong restart tunnel sau 30s neu khong phuc hoi...');
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      if (this.proc) {
+        log('warn', 'Tunnel bi treo hoac mat ket noi qua 30s. Tien hanh restart...');
+        this.proc.kill();
+      }
+    }, 30000);
+    if (this.reconnectTimer.unref) this.reconnectTimer.unref();
+  }
+
+  clearReconnectTimer() {
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+      log('info', 'Tunnel da ket noi lai thanh cong. Da xoa timer restart.');
+    }
   }
 
   start() {
@@ -852,6 +874,7 @@ class Tunnel {
         this.hostname = quick[1];
         this.state = 'up';
         this.retries = 0;
+        this.clearReconnectTimer();
         console.log('');
         log('ok', `Tunnel san sang: https://${this.hostname}`);
         
@@ -871,11 +894,13 @@ class Tunnel {
           this.retries = 0;
           log('ok', 'Cloudflare Tunnel: da ket noi');
         }
+        this.clearReconnectTimer();
         return;
       }
 
-      if (/ERR |error=|failed/i.test(line)) {
+      if (/ERR |error=|failed|lookup|dial tcp|connection closed|lost connection/i.test(line)) {
         log('warn', `cloudflared: ${line.trim().slice(0, 160)}`);
+        this.scheduleReconnect();
       }
     };
 
@@ -891,6 +916,7 @@ class Tunnel {
 
     this.proc.on('exit', (code) => {
       this.proc = null;
+      this.clearReconnectTimer();
       try {
         fs.unlinkSync(path.join(BASE_DIR, 'tunnel_url.txt'));
       } catch (_) {}
@@ -908,6 +934,7 @@ class Tunnel {
 
   stop() {
     this.stopping = true;
+    this.clearReconnectTimer();
     if (this.proc) {
       log('info', 'Dang tat Cloudflare Tunnel...');
       this.proc.kill();

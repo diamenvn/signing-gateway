@@ -38,6 +38,10 @@ Tài liệu này ghi lại toàn bộ các giải pháp kỹ thuật đã thử 
 * **Giải pháp:** Cấu hình thuộc tính `{ windowsHide: true }` trong tất cả các lệnh gọi `execFile` từ `server.js` đến `pdf-signer.exe`.
 * **Kết quả:** Không bao giờ xuất hiện cửa sổ CMD đen trên màn hình (cả lúc máy tính khởi động chạy ngầm lẫn lúc người dùng thực hiện ký số).
 
+### 1.8 Tự Động Reconnect & Self-Heal Cho Cloudflare Tunnel
+* **Giải pháp:** Bổ sung cơ chế giám sát log lỗi kết nối (`ERR`, `failed`, `lookup`, `dial tcp`, `lost connection`) của tiến trình `cloudflared.exe`. Nếu phát hiện lỗi liên tục trong 30 giây mà không tự phục hồi, Gateway sẽ kích hoạt bộ đếm giờ tự động restart (kill và khởi động lại tiến trình `cloudflared.exe`).
+* **Kết quả:** Đảm bảo Gateway tự động kết nối lại thành công sau khi mạng bị ngắt và có trở lại mà không cần khởi động lại dịch vụ thủ công.
+
 ---
 
 ## 2. Các Giải Pháp Đã Thử Nghiệm Nhưng Thất Bại (Không OK)
@@ -53,6 +57,9 @@ Tài liệu này ghi lại toàn bộ các giải pháp kỹ thuật đã thử 
 
 ### 2.4 Thoát Tiến Trình Bằng `return 0` Hoặc `Environment.Exit` Thông Thường
 * **Vấn đề:** Cả hai lệnh này đều kích hoạt tiến trình giải phóng tài nguyên của .NET CLR và gọi `DllMain(DLL_PROCESS_DETACH)` của driver. Driver VNPT-CA bị lỗi deadlock trong hàm giải phóng này làm tiến trình bị treo cứng 15 giây cho đến khi bị Gateway kill bằng `SIGKILL`.
+
+### 2.5 Cơ Chế Tự Động Reconnect Mặc Định Của cloudflared
+* **Vấn đề:** Khi mất mạng, tiến trình `cloudflared.exe` vẫn chạy ngầm và không tự động thoát. Tuy nhiên, nó thường bị treo vĩnh viễn ở vòng lặp lỗi DNS lookup (`no such host`) hoặc mất phiên Quick Tunnel cũ ở server Cloudflare Edge, khiến đường truyền bị đứt hẳn cho đến khi tiến trình được khởi động lại.
 
 ---
 
