@@ -1476,6 +1476,8 @@ function normalizeSerial(s) {
  *
  * Tra ve { ok, serial, error }.
  */
+const pinFormatCache = {};
+
 async function signPdfNative(cfg, pdfBase64, opts) {
   let exePath = cfg.nativeSignerExePath;
   if (!exePath) {
@@ -1583,6 +1585,11 @@ async function signPdfNative(cfg, pdfBase64, opts) {
       args.push('--force-cng');
     }
 
+    const cachedFormat = pinFormatCache[serial];
+    if (cachedFormat) {
+      args.push('--pin-format', cachedFormat);
+    }
+
     // 5. Thuc thi file .exe
     log('info', `Goi pdf-signer.exe de ky file. Serial: ${serial}, Pin: ${pin ? '***' : '(trong)'}`);
     
@@ -1610,6 +1617,12 @@ async function signPdfNative(cfg, pdfBase64, opts) {
           } else {
             if (stdout && stdout.trim()) {
               log('info', `[pdf-signer.exe Output]:\n${stdout.trim()}`);
+              const match = stdout.match(/\[SUCCESS_FORMAT\]\s+(\S+)/);
+              if (match && match[1]) {
+                const fmt = match[1].trim();
+                pinFormatCache[serial] = fmt;
+                log('info', `[CACHE] Ghi nho dinh dang PIN cho serial ${serial}: ${fmt}`);
+              }
             }
             resolve();
           }

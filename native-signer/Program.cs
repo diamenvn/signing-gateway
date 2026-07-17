@@ -39,6 +39,7 @@ class Program
         float smOffsetX = 0f;
         float smOffsetY = -45f;
 
+        string pinFormat = null;
         bool forceCng = false;
         bool listOnly = false;
         bool testPkcs11 = false;
@@ -67,6 +68,7 @@ class Program
             else if (args[i] == "--smheight" && i + 1 < args.Length) float.TryParse(args[++i], out smHeight);
             else if (args[i] == "--smoffsetx" && i + 1 < args.Length) float.TryParse(args[++i], out smOffsetX);
             else if (args[i] == "--smoffsety" && i + 1 < args.Length) float.TryParse(args[++i], out smOffsetY);
+            else if (args[i] == "--pin-format" && i + 1 < args.Length) pinFormat = args[++i];
         }
 
         if (listOnly)
@@ -402,7 +404,7 @@ class Program
 
             Console.WriteLine($"[INFO] Dang tien hanh ky file PDF: {input} -> {output}...");
             SignPdf(input, output, cert, pin, page, llx, lly, urx, ury, desc, image, colorStr, tsize,
-                    signmark, smWidth, smHeight, smOffsetX, smOffsetY, forceCng, matchedPkcs11Dll);
+                    signmark, smWidth, smHeight, smOffsetX, smOffsetY, forceCng, matchedPkcs11Dll, pinFormat);
             Console.WriteLine("[INFO] Ky so thanh cong!");
             return 0;
         }
@@ -469,7 +471,8 @@ class Program
         float smOffsetX,
         float smOffsetY,
         bool forceCng,
-        string forcePkcs11DllPath = null)
+        string forcePkcs11DllPath = null,
+        string pinFormat = null)
     {
         Console.WriteLine("[DEBUG] Bat dau SignPdf...");
         // 1. Dung chuoi chung thu (cert chain)
@@ -510,7 +513,7 @@ class Program
         else
         {
             Console.WriteLine("[INFO] Su dung luong ky mac dinh CAPI/CNG (Force CNG/CAPI: " + forceCng + ", CanUseCNG: " + canUseCng + ")...");
-            externalSignature = new CngUserSignature(cert, pin, "SHA256");
+            externalSignature = new CngUserSignature(cert, pin, "SHA256", pinFormat);
         }
 
         // 3. Mo va tao chu ky PDF
@@ -1556,12 +1559,14 @@ public class CngUserSignature : IExternalSignature
     private X509Certificate2 _cert;
     private string _pin;
     private string _hashAlgorithm;
+    private string _pinFormat;
 
-    public CngUserSignature(X509Certificate2 cert, string pin, string hashAlgorithm)
+    public CngUserSignature(X509Certificate2 cert, string pin, string hashAlgorithm, string pinFormat = null)
     {
         _cert = cert;
         _pin = pin;
         _hashAlgorithm = hashAlgorithm.ToUpper().Replace("-", "");
+        _pinFormat = pinFormat;
     }
 
     public string GetHashAlgorithm()
@@ -1717,61 +1722,33 @@ public class CngUserSignature : IExternalSignature
                     {
                         Console.WriteLine("[DEBUG] GetRSAPrivateKey la RSACng. Dang thu thiet lap PIN qua CNG...");
                         SetCngSilent(rsaCng.Key);
-                        
-                        // A. Thu Unicode (co \0)
-                        try
+
+                        List<string> formats = new List<string> { "asc-raw", "uni-raw", "asc-null", "uni-null" };
+                        if (!string.IsNullOrEmpty(_pinFormat) && formats.Contains(_pinFormat))
                         {
-                            Console.WriteLine("[DEBUG] Set PIN CNG (Unicode + \\0)...");
-                            SetCngPin(rsaCng.Key, _pin, true, true);
-                            byte[] sig = rsaCng.SignData(message, new HashAlgorithmName(_hashAlgorithm), RSASignaturePadding.Pkcs1);
-                            Console.WriteLine("[DEBUG] Ky bang RSACng (Unicode + \\0) thanh cong.");
-                            return sig;
-                        }
-                        catch (Exception exUniNull)
-                        {
-                            Console.WriteLine($"[DEBUG] Unicode + \\0 that bai: {exUniNull.Message}");
+                            formats.Remove(_pinFormat);
+                            formats.Insert(0, _pinFormat);
+                            Console.WriteLine($"[DEBUG] Uu tien thu PIN format da cache tu truoc: {_pinFormat}");
                         }
 
-                        // B. Thu Unicode (khong \0)
-                        try
+                        foreach (var fmt in formats)
                         {
-                            Console.WriteLine("[DEBUG] Set PIN CNG (Unicode, no \\0)...");
-                            SetCngPin(rsaCng.Key, _pin, true, false);
-                            byte[] sig = rsaCng.SignData(message, new HashAlgorithmName(_hashAlgorithm), RSASignaturePadding.Pkcs1);
-                            Console.WriteLine("[DEBUG] Ky bang RSACng (Unicode, no \\0) thanh cong.");
-                            return sig;
-                        }
-                        catch (Exception exUniNoNull)
-                        {
-                            Console.WriteLine($"[DEBUG] Unicode no \\0 that bai: {exUniNoNull.Message}");
-                        }
-
-                        // C. Thu ASCII (co \0)
-                        try
-                        {
-                            Console.WriteLine("[DEBUG] Set PIN CNG (ASCII + \\0)...");
-                            SetCngPin(rsaCng.Key, _pin, false, true);
-                            byte[] sig = rsaCng.SignData(message, new HashAlgorithmName(_hashAlgorithm), RSASignaturePadding.Pkcs1);
-                            Console.WriteLine("[DEBUG] Ky bang RSACng (ASCII + \\0) thanh cong.");
-                            return sig;
-                        }
-                        catch (Exception exAscNull)
-                        {
-                            Console.WriteLine($"[DEBUG] ASCII + \\0 that bai: {exAscNull.Message}");
-                        }
-
-                        // D. Thu ASCII (khong \0)
-                        try
-                        {
-                            Console.WriteLine("[DEBUG] Set PIN CNG (ASCII, no \\0)...");
-                            SetCngPin(rsaCng.Key, _pin, false, false);
-                            byte[] sig = rsaCng.SignData(message, new HashAlgorithmName(_hashAlgorithm), RSASignaturePadding.Pkcs1);
-                            Console.WriteLine("[DEBUG] Ky bang RSACng (ASCII, no \\0) thanh cong.");
-                            return sig;
-                        }
-                        catch (Exception exAscNoNull)
-                        {
-                            Console.WriteLine($"[DEBUG] ASCII no \\0 that bai: {exAscNoNull.Message}");
+                            try
+                            {
+                                Console.WriteLine($"[DEBUG] Set PIN CNG dinh dang: {fmt}...");
+                                bool isUnicode = fmt.StartsWith("uni");
+                                bool withNull = fmt.EndsWith("null");
+                                SetCngPin(rsaCng.Key, _pin, isUnicode, withNull);
+                                byte[] sig = rsaCng.SignData(message, new HashAlgorithmName(_hashAlgorithm), RSASignaturePadding.Pkcs1);
+                                
+                                Console.WriteLine($"[SUCCESS_FORMAT] {fmt}");
+                                Console.WriteLine($"[DEBUG] Ky bang RSACng ({fmt}) thanh cong.");
+                                return sig;
+                            }
+                            catch (Exception ex)
+                            {
+                                Console.WriteLine($"[DEBUG] Thu PIN CNG dinh dang {fmt} loi: {ex.Message}");
+                            }
                         }
                     }
                 }
@@ -1802,45 +1779,60 @@ public class CngUserSignature : IExternalSignature
         {
             Console.WriteLine("[DEBUG] Uu tien luong CSP cho khoa Type > 0...");
             
-            // A. Thu voi NoPrompt (Silent) + KeyPassword + CryptSetProvParam truoc
-            // A1. Thu voi NoPrompt (Silent) + KeyPassword + CryptSetProvParam (Unicode)
-            try
+            List<string> formats = new List<string> { "asc-raw", "uni-raw", "asc-null", "uni-null" };
+            if (!string.IsNullOrEmpty(_pinFormat) && formats.Contains(_pinFormat))
             {
-                Console.WriteLine("[DEBUG] Thu CSP voi NoPrompt + KeyPassword + CryptSetProvParam (Unicode)...");
-                CspParameters cspParamsSilent = new CspParameters
-                {
-                    ProviderName = provInfo.pwszProvName,
-                    ProviderType = (int)provInfo.dwProvType,
-                    KeyContainerName = provInfo.pwszContainerName,
-                    Flags = CspProviderFlags.UseExistingKey | CspProviderFlags.NoPrompt
-                };
+                formats.Remove(_pinFormat);
+                formats.Insert(0, _pinFormat);
+                Console.WriteLine($"[DEBUG] Uu tien thu CSP PIN format da cache tu truoc: {_pinFormat}");
+            }
 
-                if (!string.IsNullOrEmpty(_pin))
+            bool silentSuccess = false;
+            foreach (var fmt in formats)
+            {
+                try
                 {
-                    SecureString securePin = new SecureString();
-                    foreach (char c in _pin)
+                    Console.WriteLine($"[DEBUG] Thu CSP NoPrompt dinh dang: {fmt}...");
+                    CspParameters cspParamsSilent = new CspParameters
                     {
-                        securePin.AppendChar(c);
-                    }
-                    cspParamsSilent.KeyPassword = securePin;
-                }
+                        ProviderName = provInfo.pwszProvName,
+                        ProviderType = (int)provInfo.dwProvType,
+                        KeyContainerName = provInfo.pwszContainerName,
+                        Flags = CspProviderFlags.UseExistingKey | CspProviderFlags.NoPrompt
+                    };
 
-                using (var rsaCsp = new RSACryptoServiceProvider(cspParamsSilent))
-                {
                     if (!string.IsNullOrEmpty(_pin))
                     {
-                        SetCspPin(rsaCsp, _pin, true, true);
+                        SecureString securePin = new SecureString();
+                        foreach (char c in _pin) securePin.AppendChar(c);
+                        cspParamsSilent.KeyPassword = securePin;
                     }
-                    byte[] sig = rsaCsp.SignData(message, new HashAlgorithmName(_hashAlgorithm), RSASignaturePadding.Pkcs1);
-                    Console.WriteLine("[DEBUG] Ky CSP NoPrompt (Unicode) thanh cong.");
-                    return sig;
+
+                    using (var rsaCsp = new RSACryptoServiceProvider(cspParamsSilent))
+                    {
+                        if (!string.IsNullOrEmpty(_pin))
+                        {
+                            bool isUnicode = fmt.StartsWith("uni");
+                            bool withNull = fmt.EndsWith("null");
+                            SetCspPin(rsaCsp, _pin, isUnicode, withNull);
+                        }
+                        byte[] sig = rsaCsp.SignData(message, new HashAlgorithmName(_hashAlgorithm), RSASignaturePadding.Pkcs1);
+                        
+                        Console.WriteLine($"[SUCCESS_FORMAT] {fmt}");
+                        Console.WriteLine($"[DEBUG] Ky CSP NoPrompt ({fmt}) thanh cong.");
+                        return sig;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[DEBUG] Thu CSP NoPrompt dinh dang {fmt} loi: {ex.Message}");
                 }
             }
-            catch (Exception exUnicodeSilent)
+
+            if (!silentSuccess)
             {
-                Console.WriteLine($"[DEBUG] Ky CSP NoPrompt (Unicode) that bai: {exUnicodeSilent.Message}. Thu tiep voi NoPrompt (ASCII)...");
-                
-                // A2. Thu voi NoPrompt (Silent) + KeyPassword + CryptSetProvParam (ASCII)
+                Console.WriteLine("[DEBUG] Luong CSP NoPrompt that bai hoàn toàn. Thu lai voi luong CSP tuong tac...");
+                // A2. Thu voi NoPrompt (Silent) + KeyPassword + CryptSetProvParam (ASCII) - (this catch label is keep for backward logic compatibility)
                 try
                 {
                     CspParameters cspParamsSilent = new CspParameters
