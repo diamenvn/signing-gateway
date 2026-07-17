@@ -1787,7 +1787,6 @@ public class CngUserSignature : IExternalSignature
                 Console.WriteLine($"[DEBUG] Uu tien thu CSP PIN format da cache tu truoc: {_pinFormat}");
             }
 
-            bool silentSuccess = false;
             foreach (var fmt in formats)
             {
                 try
@@ -1829,12 +1828,10 @@ public class CngUserSignature : IExternalSignature
                 }
             }
 
-            if (!silentSuccess)
+            Console.WriteLine("[DEBUG] Luong CSP NoPrompt that bai hoàn toàn. Thu lai voi luong CSP tuong tac...");
+            // A2. Thu voi NoPrompt (Silent) + KeyPassword + CryptSetProvParam (ASCII) - (this catch label is keep for backward logic compatibility)
+            try
             {
-                Console.WriteLine("[DEBUG] Luong CSP NoPrompt that bai hoàn toàn. Thu lai voi luong CSP tuong tac...");
-                // A2. Thu voi NoPrompt (Silent) + KeyPassword + CryptSetProvParam (ASCII) - (this catch label is keep for backward logic compatibility)
-                try
-                {
                     CspParameters cspParamsSilent = new CspParameters
                     {
                         ProviderName = provInfo.pwszProvName,
