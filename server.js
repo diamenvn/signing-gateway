@@ -770,9 +770,16 @@ class Plugin {
     if (this.cfg.useNativeSigner) {
       try {
         const { execFile } = require('node:child_process');
-        const exePath = path.join(BASE_DIR, 'bin', 'pdf-signer.exe');
+        let exePath = this.cfg.nativeSignerExePath;
+        if (!exePath) {
+          const packagedPath = path.join(BASE_DIR, 'bin', 'pdf-signer.exe');
+          const devPath = path.join(__dirname, 'bin', 'pdf-signer.exe');
+          exePath = process.pkg
+            ? (fs.existsSync(packagedPath) ? packagedPath : devPath)
+            : (fs.existsSync(devPath) ? devPath : packagedPath);
+        }
         const raw = await new Promise((resolve, reject) => {
-          execFile(exePath, ['--list'], { windowsHide: true }, (err, stdout, stderr) => {
+          execFile(exePath, ['--list'], { windowsHide: false }, (err, stdout, stderr) => {
             if (err) reject(err);
             else resolve(stdout);
           });
@@ -813,9 +820,16 @@ class Plugin {
     if (this.cfg.useNativeSigner) {
       try {
         const { execFile } = require('node:child_process');
-        const exePath = path.join(BASE_DIR, 'bin', 'pdf-signer.exe');
+        let exePath = this.cfg.nativeSignerExePath;
+        if (!exePath) {
+          const packagedPath = path.join(BASE_DIR, 'bin', 'pdf-signer.exe');
+          const devPath = path.join(__dirname, 'bin', 'pdf-signer.exe');
+          exePath = process.pkg
+            ? (fs.existsSync(packagedPath) ? packagedPath : devPath)
+            : (fs.existsSync(devPath) ? devPath : packagedPath);
+        }
         const raw = await new Promise((resolve, reject) => {
-          execFile(exePath, ['--list'], { windowsHide: true }, (err, stdout, stderr) => {
+          execFile(exePath, ['--list'], { windowsHide: false }, (err, stdout, stderr) => {
             if (err) reject(err);
             else resolve(stdout);
           });
@@ -1314,7 +1328,7 @@ function json(res, code, obj) {
         errorCode = obj.error_code;
       } else if (typeof obj.error_code === 'string') {
         const parsed = parseInt(obj.error_code, 10);
-        errorCode = isNaN(parsed) ? -1 : parsed;
+        errorCode = isNaN(parsed) ? (obj.error_code || -1) : parsed;
       } else if (obj.error) {
         if (typeof obj.error === 'number') {
           errorCode = obj.error;
@@ -1328,6 +1342,27 @@ function json(res, code, obj) {
           }
         }
       }
+    }
+    
+    // Auto-detect string error code types from message/error properties
+    let errorCodeStr = null;
+    const fullErrText = String(obj && (obj.error || obj.message || '')).toUpperCase();
+    if (fullErrText.includes('WRONG_PIN')) {
+      errorCodeStr = 'WRONG_PIN';
+    } else if (fullErrText.includes('KHONG_CO_USB_TOKEN')) {
+      errorCodeStr = 'KHONG_CO_USB_TOKEN';
+    } else if (fullErrText.includes('CERTIFICATE_NOT_FOUND')) {
+      errorCodeStr = 'CERTIFICATE_NOT_FOUND';
+    } else if (fullErrText.includes('SIGNMARK_NOT_FOUND')) {
+      errorCodeStr = 'SIGNMARK_NOT_FOUND';
+    } else if (fullErrText.includes('TOKEN_DANG_BAN') || fullErrText.includes('TOKEN_BUSY')) {
+      errorCodeStr = 'TOKEN_BUSY';
+    } else if (fullErrText.includes('THIEU_SERIAL')) {
+      errorCodeStr = 'THIEU_SERIAL';
+    }
+
+    if (errorCodeStr) {
+      errorCode = errorCodeStr;
     }
     
     let message = (obj && obj.message) ? obj.message : ((obj && obj.error) ? obj.error : 'Đã có lỗi xảy ra');
@@ -1554,7 +1589,7 @@ async function signPdfNative(cfg, pdfBase64, opts) {
     const { execFile } = require('node:child_process');
     try {
       await new Promise((resolve, reject) => {
-        execFile(exePath, args, { windowsHide: true, timeout: cfg.signTimeoutMs, killSignal: 'SIGKILL' }, (err, stdout, stderr) => {
+        execFile(exePath, args, { windowsHide: false, timeout: cfg.signTimeoutMs, killSignal: 'SIGKILL' }, (err, stdout, stderr) => {
           // Ghi de log debug de nguoi dung de kiem tra
           try {
             const debugLogPath = path.join(BASE_DIR, 'pdf-signer-debug.log');
@@ -1648,7 +1683,7 @@ async function signXmlNative(cfg, xmlString, opts) {
     const { execFile } = require('node:child_process');
     try {
       await new Promise((resolve, reject) => {
-        execFile(exePath, args, { windowsHide: true, timeout: cfg.signTimeoutMs, killSignal: 'SIGKILL' }, (err, stdout, stderr) => {
+        execFile(exePath, args, { windowsHide: false, timeout: cfg.signTimeoutMs, killSignal: 'SIGKILL' }, (err, stdout, stderr) => {
           if (err) {
             log('error', `Loi khi thuc thi pdf-signer.exe de ky XML:\nStdout: ${stdout}\nStderr: ${stderr}`);
             const errorMsg = stderr.trim() || stdout.trim() || err.message;
