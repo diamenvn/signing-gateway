@@ -1120,7 +1120,14 @@ function decryptPinAES_GCM(encryptedPayloadB64, keyString) {
     const payload = Buffer.from(encryptedPayloadB64, 'base64');
     if (payload.length < 12 + 16) return encryptedPayloadB64;
 
-    const keyBytes = Buffer.from(keyString, 'utf8');
+    let keyBytes;
+    if (typeof keyString === 'string' && keyString.length === 64 && /^[0-9a-fA-F]{64}$/.test(keyString)) {
+      keyBytes = Buffer.from(keyString, 'hex');
+    } else {
+      keyBytes = Buffer.from(keyString, 'utf8');
+      if (keyBytes.length > 32) keyBytes = keyBytes.subarray(0, 32);
+    }
+
     let algo = 'aes-256-gcm';
     if (keyBytes.length === 16) algo = 'aes-128-gcm';
     else if (keyBytes.length === 24) algo = 'aes-192-gcm';
