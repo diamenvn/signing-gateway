@@ -449,278 +449,35 @@ function parsePluginResponse(text) {
 
 class Plugin {
   constructor(cfg) {
-    this.cfg = cfg; this.ws = null; this.port = null;
-    this.busy = false; this.version = null;
-    this._mutex = new Mutex();   // moi lenh goi plugin noi duoi nhau qua day
-    this.licensed = false;       // da nap license cho ket noi hien tai chua
-    this._reconnecting = false;
-    this._monitorOn = false;
-    this._lastTokenState = null;  // theo doi rut/cam USB
+    this.cfg = cfg;
+    this.busy = false;
+    this.version = "NativeSigner";
+    this._tokenCache = null;
+    this._tokenCacheAt = null;
+    this._serialCache = null;
+    this._serialCacheAt = null;
   }
-  get connected() { return this.ws && this.ws.readyState === WebSocket.OPEN; }
+  get connected() { return true; }
 
-  _open(port) {
-    return new Promise((res, rej) => {
-      const ws = new WebSocket(`wss://localhost:${port}/plugin`, {
-        rejectUnauthorized: false,
-        origin: this.cfg.pluginOrigin,
-        headers: { Origin: this.cfg.pluginOrigin },
-      });
-      const t = setTimeout(() => { ws.terminate(); rej(new Error('timeout')); }, 3000);
-      ws.on('open', () => { clearTimeout(t); res(ws); });
-      ws.on('error', (e) => { clearTimeout(t); rej(e); });
-    });
-  }
+  async connect() { return true; }
+  async warmup() { return true; }
+  async ensureReady() { return true; }
+  tryStartNativePlugin() { return false; }
 
-  async connect() {
-    for (const p of this.cfg.pluginPorts) {
-      try {
-        this.ws = await this._open(p);
-        this.port = p;
-        this.licensed = false;
-        this.ws.on('close', () => {
-          this.ws = null; this.licensed = false;
-          log('warn', 'Mat ket noi plugin. Se tu ket noi lai...');
-          this._scheduleReconnect();
-        });
-        this.ws.on('error', () => {});
-        log('ok', `Ket noi plugin tai port ${p}`);
-        return true;
-      } catch (_) { /* thu port ke tiep */ }
-    }
-    return false;
-  }
-
-  /**
-   * Tu khoi dong VNPT-CA Plugin native neu no chua chay.
-   * Tim file thuc thi o cac vi tri cai dat thuong gap.
-   * Tra ve true neu da goi lenh khoi dong (khong dam bao chay ngay).
-   */
-  tryStartNativePlugin() {
-    if (process.platform !== 'win32') return false;
-
-    // 1. Dung duong dan cau hinh neu co
-    if (this.cfg.pluginExePath && fs.existsSync(this.cfg.pluginExePath)) {
-      log('info', `Khoi dong Plugin tu cau hinh: ${this.cfg.pluginExePath}`);
-      spawn(this.cfg.pluginExePath, [], { detached: true, stdio: 'ignore', windowsHide: true }).unref();
-      return true;
-    }
-
-    // 2. Tim theo danh sach candidates tu dong (ho tro ca VNPT va ICA)
-    const candidates = [
-      // VNPT candidates
-      'C\\:\\Program Files (x86)\\VNPT-CA Plugin\\VNPT-CA Plugin.exe',
-      'C\\:\\Program Files\\VNPT-CA Plugin\\VNPT-CA Plugin.exe',
-      path.join(process.env.LOCALAPPDATA || '', 'VNPT-CA Plugin', 'VNPT-CA Plugin.exe'),
-      path.join(process.env.PROGRAMFILES || '', 'VNPT-CA Plugin', 'VNPT-CA Plugin.exe'),
-      path.join(process.env['PROGRAMFILES(X86)'] || '', 'VNPT-CA Plugin', 'VNPT-CA Plugin.exe'),
-      // ICA candidates
-      'C\\:\\Program Files (x86)\\i-CA Plugin\\ica_csp11_v1_certd.exe',
-      'C\\:\\Program Files\\i-CA Plugin\\ica_csp11_v1_certd.exe',
-      'C\\:\\Program Files (x86)\\ICA\\ica_csp11_v1_certd.exe',
-      'C\\:\\Program Files\\ICA\\ica_csp11_v1_certd.exe',
-      path.join(process.env.LOCALAPPDATA || '', 'i-CA Plugin', 'ica_csp11_v1_certd.exe'),
-      path.join(process.env.PROGRAMFILES || '', 'i-CA Plugin', 'ica_csp11_v1_certd.exe'),
-      path.join(process.env['PROGRAMFILES(X86)'] || '', 'i-CA Plugin', 'ica_csp11_v1_certd.exe'),
-    ].map((s) => s.replace('C\\:', 'C:'));
-
-    // Neu cau hinh pluginProcessName thi uu tien tim file exe co ten do truoc
-    const sortedCandidates = [...candidates];
-    if (this.cfg.pluginProcessName) {
-      const matchName = this.cfg.pluginProcessName.toLowerCase();
-      sortedCandidates.sort((a, b) => {
-        const aMatch = path.basename(a).toLowerCase() === matchName;
-        const bMatch = path.basename(b).toLowerCase() === matchName;
-        if (aMatch && !bMatch) return -1;
-        if (!aMatch && bMatch) return 1;
-        return 0;
-      });
-    }
-
-    for (const exe of sortedCandidates) {
-      try {
-        if (fs.existsSync(exe)) {
-          log('info', `Khoi dong Plugin tu dong: ${exe}`);
-          spawn(exe, [], { detached: true, stdio: 'ignore', windowsHide: true }).unref();
-          return true;
-        }
-      } catch (_) { /* thu tiep */ }
-    }
-
-    log('warn', 'Khong tim thay Plugin ky so trong he thong de tu khoi dong.');
-    return false;
-  }
-
-  _scheduleReconnect() {
-    if (this._reconnecting) return;
-    this._reconnecting = true;
-    let tried = 0;
-    const attempt = async () => {
-      if (this.connected) { this._reconnecting = false; return; }
-      tried++;
-      // Sau vai lan that bai, thu tu KHOI DONG plugin native (co the no da tat)
-      if (tried === 3) this.tryStartNativePlugin();
-
-      if (await this.connect()) {
-        this._reconnecting = false;
-        log('ok', 'Da ket noi lai plugin.');
-        try { await this.warmup(); } catch (_) {}
-        return;
-      }
-      const wait = Math.min(2000 * tried, 10000);
-      setTimeout(attempt, wait).unref();
-    };
-    setTimeout(attempt, 1500).unref();
-  }
-
-  /** Dam bao dang ket noi + da nap license. Goi truoc moi thao tac quan trong. */
-  async ensureReady() {
-    if (!this.connected) {
-      if (!(await this.connect())) {
-        this.tryStartNativePlugin();
-        // cho plugin khoi dong roi thu lai 1 lan
-        await new Promise((r) => setTimeout(r, 3000));
-        if (!(await this.connect())) throw new Error('PLUGIN_KHONG_KET_NOI');
-      }
-    }
-    if (!this.licensed && this.cfg.licenseKey) {
-      try {
-        await this.call(FN.setLicenseKey, [this.cfg.licenseKey]);
-        this.licensed = true;
-      } catch (_) { /* warmup se thu lai */ }
-    }
-  }
-
-  /**
-   * Protocol VNPT Plugin:
-   *   gui : {functionID, funcCallback, args, domain}
-   *   nhan: "<payload>*<funcCallback>"
-   * Khong co request id -> phai serialize hoan toan.
-   *
-   * MOI lenh goi plugin (ky, checkToken, license, monitor...) deu di qua
-   * mot mutex CHUNG. Truoc day chi cac lenh ky duoc serialize, con monitor
-   * chay nen thi goi thang -> no chen ngang lenh ky -> "PLUGIN_DANG_BAN".
-   * Gio tat ca noi duoi nhau, khong ai bi tu choi.
-   */
-  async call(fnId, args, timeoutMs = 30000) {
-    return this._mutex.run(() => this._callNow(fnId, args, timeoutMs));
-  }
-
-  async _callNow(fnId, args, timeoutMs) {
-    if (!this.connected) throw new Error('PLUGIN_KHONG_KET_NOI');
-    this.busy = true;
-    try {
-      return await new Promise((res, rej) => {
-        const cb = 'cb_' + crypto.randomBytes(4).toString('hex');
-        const t = setTimeout(() => {
-          this.ws.off('message', on);
-          const fnName = Object.keys(FN).find(k => FN[k] === fnId) || fnId;
-          log('error', `Goi plugin qua han (timeout ${timeoutMs}ms) o ham: ${fnName}`);
-          
-          if (fnId !== FN.SignPDF && fnId !== FN.SignXML) {
-            this.forceRestartNativePlugin().catch(() => {});
-            if (fnId === FN.CheckToken) {
-              rej(new Error('PLUGIN_TREO_CHECK_TOKEN'));
-            } else {
-              rej(new Error('PLUGIN_TREO_CONG_CU'));
-            }
-          } else {
-            rej(new Error('PLUGIN_QUA_HAN'));
-          }
-        }, timeoutMs);
-        const on = (raw) => {
-          clearTimeout(t);
-          this.ws.off('message', on);
-          try { res(parsePluginResponse(raw.toString())); }
-          catch (e) { rej(e); }
-        };
-        this.ws.on('message', on);
-        this.ws.send(JSON.stringify({
-          functionID: fnId, funcCallback: cb, args, domain: this.cfg.pluginDomain,
-        }));
-      });
-    } finally { this.busy = false; }
-  }
-
-  async warmup() {
-    // BAT BUOC goi truoc tien. Khong co license, plugin tra ve:
-    //   {"code":-1, "data":"", "error":"License not set for: <domain>"}
-    // License gan voi DOMAIN gui trong truong `domain` cua moi request.
-    if (this.cfg.licenseKey) {
-      const lic = this.cfg.licenseKey;
-      if (/\s/.test(lic)) {
-        log('warn', `License co ${(lic.match(/\s/g) || []).length} ky tu trang/xuong dong -> nhieu kha nang bi cat khi dan.`);
-      }
-      try {
-        await this.call(FN.setLicenseKey, [lic]);
-        this.licensed = true;
-        log('ok', `Da nap license (${lic.length} ky tu) cho domain: ${this.cfg.pluginDomain}`);
-      } catch (e) {
-        this.licensed = false;
-        log('error', `Nap license that bai: ${e.message}`);
-        log('error', `License dai ${lic.length} ky tu, domain gui: ${this.cfg.pluginDomain}`);
-        log('error', 'Chay:  signing-gateway.exe --license   de do nguyen nhan.');
-      }
-    } else {
-      log('warn', 'CHUA CO licenseKey trong config.json.');
-      log('warn', 'Neu plugin chua duoc cap license san cho domain nay, moi lenh ky se bi tu choi.');
-    }
-
-    this.version = await this.call(FN.getVersion, ['']).catch(() => null);
-    await this.call(FN.SetGetCertFromUsbToken, ['1']).catch(() => {});
-    await this.call(FN.SetGetCertByPkcs11, ['1']).catch(() => {});
-    await this.call(FN.SetShowCertListDialog, ['0']).catch(() => {});
-    log('ok', `Plugin version: ${this.version || '?'}`);
-  }
-
-  /**
-   * Theo doi lien tuc: plugin con song khong, USB con cam khong.
-   * Tu log khi rut/cam USB. Tu ket noi lai neu plugin tat.
-   * KHONG can tat/bat lai tool khi thay doi phan cung.
-   */
-  /**
-   * Buoc plugin doc lai token tu dau: refresh cert, va neu can thi mo lai
-   * ket noi WebSocket (mot so plugin chi doc lai USB khi co ket noi moi).
-   * Dung khi cam USB vao ma plugin van bao "khong co token".
-   */
   async reloadToken() {
-    if (!this.connected) {
-      await this.connect().catch(() => {});
-      if (this.connected) await this.warmup().catch(() => {});
-    }
-    // Thu refresh nhe truoc
-    await this.call(FN.SetGetCertFromUsbToken, ['1']).catch(() => {});
-    await this.call(FN.SetGetCertByPkcs11, ['1']).catch(() => {});
-    let t = await this.checkToken().catch(() => null);
-    if (t && t.present) return { present: true, method: 'refresh' };
-
-    // Van khong thay -> mo lai ket noi (dut cache cua plugin)
-    try { if (this.ws) this.ws.close(); } catch (_) {}
-    this.ws = null; this.licensed = false;
-    await new Promise((r) => setTimeout(r, 500));
-    await this.connect().catch(() => {});
-    if (this.connected) {
-      await this.warmup().catch(() => {});
-      t = await this.checkToken().catch(() => null);
-    }
-    return { present: !!(t && t.present), method: 'reconnect' };
+    this.invalidateTokenCache();
+    const t = await this.checkToken(true);
+    return { present: t.present, method: 'native-refresh' };
   }
 
   startMonitor(intervalMs) {
     if (this._monitorOn) return;
-    if (!this.cfg.monitorToken) {
-      log('info', 'Theo doi token nen: TAT (tranh nghen driver USB).');
-      return;
-    }
+    if (!this.cfg.monitorToken) return;
     this._monitorOn = true;
     intervalMs = intervalMs || this.cfg.monitorIntervalMs || 15000;
-    log('info', `Theo doi token nen: BAT (moi ${intervalMs / 1000}s).`);
     const tick = async () => {
       try {
-        // Monitor phai NHE: chi hoi trang thai, KHONG refresh/reconnect o day.
-        // Truoc day monitor goi SetGetCertFromUsbToken + reconnect -> chiem mutex
-        // -> lenh ky phai cho ca chuoi nay -> ky cham ca phut. Da bo.
-        if (this.connected && !this.busy) {
+        if (!this.busy) {
           const t = await this.checkToken().catch(() => null);
           const present = t ? t.present : null;
           if (present !== null && present !== this._lastTokenState) {
@@ -734,81 +491,69 @@ class Plugin {
             this._lastTokenState = present;
           }
         }
-      } catch (_) { /* bo qua */ }
+      } catch (_) {}
       setTimeout(tick, intervalMs).unref();
     };
     setTimeout(tick, intervalMs).unref();
   }
 
-  /**
-   * CheckToken tra ve CHUOI THO, khong phai JSON.
-   * Do thuc te: "0" = KHONG co token cam vao may.
-   * (Phat hien khi rut token ra ma he thong van bao "da phat hien".)
-   * Gia tri khac 0 = co token. Chua ro no la so luong hay ma trang thai.
-   */
-  /**
-   * CheckToken tra ve CHUOI THO. "0" = KHONG co token.
-   *
-   * Co CACHE NGAN (mac dinh 10s): hoi driver PKCS#11 lien tuc lam nghen
-   * thiet bi USB — da tung lam treo ca phan mem quan ly token va plugin.
-   * Cache giup: khong hoi qua day, nhung van phat hien duoc rut USB
-   * trong vong ~10s.
-   */
   async checkToken(force = false) {
     const now = Date.now();
     const ttl = this.cfg.tokenCacheMs ?? 10000;
     if (!force && this._tokenCache && now - this._tokenCacheAt < ttl) {
       return this._tokenCache;
     }
-    const raw = await this.call(FN.CheckToken, [''], 5000);
-    const r = { raw: String(raw).trim(), present: String(raw).trim() !== '0' };
-    this._tokenCache = r;
-    this._tokenCacheAt = now;
-    return r;
-  }
-  async getCertInfo() {
-    if (this.cfg.useNativeSigner) {
-      try {
-        const { execFile } = require('node:child_process');
-        let exePath = this.cfg.nativeSignerExePath;
-        if (!exePath) {
-          const packagedPath = path.join(BASE_DIR, 'bin', 'pdf-signer.exe');
-          const devPath = path.join(__dirname, 'bin', 'pdf-signer.exe');
-          exePath = process.pkg
-            ? (fs.existsSync(packagedPath) ? packagedPath : devPath)
-            : (fs.existsSync(devPath) ? devPath : packagedPath);
-        }
-        const raw = await new Promise((resolve, reject) => {
-          execFile(exePath, ['--list'], { windowsHide: false }, (err, stdout, stderr) => {
-            if (err) reject(err);
-            else resolve(stdout);
-          });
-        });
-        
-        const certs = [];
-        const lines = raw.split('\n');
-        for (const line of lines) {
-          if (line.includes('SERIAL:')) {
-            const parts = line.split('|');
-            const serial = (parts.find(p => p.startsWith('SERIAL:')) || '').replace('SERIAL:', '').trim();
-            const cn = (parts.find(p => p.startsWith('CN:')) || '').replace('CN:', '').trim();
-            const hasKey = (parts.find(p => p.startsWith('HAS_KEY:')) || '').replace('HAS_KEY:', '').trim();
-            certs.push({ serial, cn, hasKey: hasKey === 'True' });
-          }
-        }
-        return JSON.stringify(certs);
-      } catch (e) {
-        log('error', `Loi khi getCertInfo tu native-signer: ${e.message}`);
-        return '[]';
-      }
+    try {
+      const serials = await this.listSerials(force);
+      const present = serials.length > 0;
+      const r = { raw: present ? '1' : '0', present };
+      this._tokenCache = r;
+      this._tokenCacheAt = now;
+      return r;
+    } catch (e) {
+      const r = { raw: '0', present: false };
+      this._tokenCache = r;
+      this._tokenCacheAt = now;
+      return r;
     }
-    return this.call(FN.GetCertInfo, ['1', this.cfg.certificateSerial || ''], 15000);
   }
 
-  /**
-   * Liet ke serial cua cac cert dang co trong token (chuan hoa chu HOA).
-   * Cache NGAN (mac dinh 3s) va co the ep lam moi (force=true).
-   */
+  async getCertInfo() {
+    try {
+      const { execFile } = require('node:child_process');
+      let exePath = this.cfg.nativeSignerExePath;
+      if (!exePath) {
+        const packagedPath = path.join(BASE_DIR, 'bin', 'pdf-signer.exe');
+        const devPath = path.join(__dirname, 'bin', 'pdf-signer.exe');
+        exePath = process.pkg
+          ? (fs.existsSync(packagedPath) ? packagedPath : devPath)
+          : (fs.existsSync(devPath) ? devPath : packagedPath);
+      }
+      const raw = await new Promise((resolve, reject) => {
+        execFile(exePath, ['--list'], { windowsHide: true }, (err, stdout, stderr) => {
+          if (err) reject(err);
+          else resolve(stdout);
+        });
+      });
+      
+      const certs = [];
+      const lines = raw.split('\n');
+      for (const line of lines) {
+        if (line.includes('SERIAL:')) {
+          const parts = line.split('|');
+          const serial = (parts.find(p => p.startsWith('SERIAL:')) || '').replace('SERIAL:', '').trim();
+          const cn = (parts.find(p => p.startsWith('CN:')) || '').replace('CN:', '').trim();
+          const hasKey = (parts.find(p => p.startsWith('HAS_KEY:')) || '').replace('HAS_KEY:', '').trim();
+          certs.push({ serial, cn, hasKey: hasKey === 'True' });
+        }
+      }
+      return JSON.stringify(certs);
+    } catch (e) {
+      log('error', `Loi khi getCertInfo tu native-signer: ${e.message}`);
+      return '[]';
+    }
+  }
+
   async listSerials(force = false) {
     const now = Date.now();
     const ttl = this.cfg.serialCacheMs ?? 3000;
@@ -817,47 +562,36 @@ class Plugin {
     }
     
     let serials = [];
-    if (this.cfg.useNativeSigner) {
-      try {
-        const { execFile } = require('node:child_process');
-        let exePath = this.cfg.nativeSignerExePath;
-        if (!exePath) {
-          const packagedPath = path.join(BASE_DIR, 'bin', 'pdf-signer.exe');
-          const devPath = path.join(__dirname, 'bin', 'pdf-signer.exe');
-          exePath = process.pkg
-            ? (fs.existsSync(packagedPath) ? packagedPath : devPath)
-            : (fs.existsSync(devPath) ? devPath : packagedPath);
-        }
-        const raw = await new Promise((resolve, reject) => {
-          execFile(exePath, ['--list'], { windowsHide: false }, (err, stdout, stderr) => {
-            if (err) reject(err);
-            else resolve(stdout);
-          });
+    try {
+      const { execFile } = require('node:child_process');
+      let exePath = this.cfg.nativeSignerExePath;
+      if (!exePath) {
+        const packagedPath = path.join(BASE_DIR, 'bin', 'pdf-signer.exe');
+        const devPath = path.join(__dirname, 'bin', 'pdf-signer.exe');
+        exePath = process.pkg
+          ? (fs.existsSync(packagedPath) ? packagedPath : devPath)
+          : (fs.existsSync(devPath) ? devPath : packagedPath);
+      }
+      const raw = await new Promise((resolve, reject) => {
+        execFile(exePath, ['--list'], { windowsHide: true }, (err, stdout, stderr) => {
+          if (err) reject(err);
+          else resolve(stdout);
         });
-        
-        const lines = raw.split('\n');
-        for (const line of lines) {
-          if (line.includes('SERIAL:')) {
-            const parts = line.split('|');
-            const serialPart = parts.find(p => p.startsWith('SERIAL:'));
-            if (serialPart) {
-              const s = serialPart.replace('SERIAL:', '').trim().toUpperCase().replace(/\s+/g, '');
-              if (s) serials.push(s);
-            }
+      });
+      
+      const lines = raw.split('\n');
+      for (const line of lines) {
+        if (line.includes('SERIAL:')) {
+          const parts = line.split('|');
+          const serialPart = parts.find(p => p.startsWith('SERIAL:'));
+          if (serialPart) {
+            const s = serialPart.replace('SERIAL:', '').trim().toUpperCase().replace(/\s+/g, '');
+            if (s) serials.push(s);
           }
         }
-      } catch (e) {
-        log('error', `Loi khi listSerials tu native-signer: ${e.message}`);
       }
-    } else {
-      const raw = await this.call(FN.GetAllCertificates, [''], 15000);
-      try {
-        const arr = JSON.parse(raw);
-        serials = arr.map((item) => {
-          const o = typeof item === 'string' ? JSON.parse(item) : item;
-          return String(o.serial || '').toUpperCase().replace(/\s+/g, '');
-        }).filter(Boolean);
-      } catch (_) {}
+    } catch (e) {
+      log('error', `Loi khi listSerials tu native-signer: ${e.message}`);
     }
 
     this._serialCache = serials;
@@ -865,148 +599,21 @@ class Plugin {
     return serials;
   }
 
-  /** Xoa moi cache token — goi khi nghi ngo USB da thay doi. */
   invalidateTokenCache() {
     this._serialCache = null;
     this._tokenCache = null;
     this._lastTokenState = null;
   }
 
-  /**
-   * Ky PDF NGUYEN TU: gom kiem token + doc serial + ky vao MOT lan giu mutex.
-   * Khong lenh nao chen giua duoc. Tranh truong hop:
-   *   - Kiem token thay "co", nhung truoc khi ky thi USB bi rut
-   *   - Hai request ky chen lenh cua nhau tren driver -> treo
-   *
-   * Xac minh serial NGAY TRONG mutex, bang du lieu token THAT (khong cache),
-   * nen serial cua USB da rut se bi tu choi.
-   */
-  async signPdfAtomic(pdfB64, o, requiredSerial) {
-    return this._mutex.run(async () => {
-      // 1. Token con cam khong? (hoi that, dang trong mutex)
-      const raw = await this._callNow(FN.CheckToken, [''], 5000);
-      if (String(raw).trim() === '0') throw new Error('KHONG_CO_USB_TOKEN');
-
-      // 2. Doc serial that trong token dang cam (khong cache)
-      if (requiredSerial) {
-        const certRaw = await this._callNow(FN.GetAllCertificates, [''], 15000);
-        let serials = [];
-        try {
-          const arr = JSON.parse(certRaw);
-          serials = arr.map((it) => {
-            const x = typeof it === 'string' ? JSON.parse(it) : it;
-            return String(x.serial || '').toUpperCase().replace(/\s+/g, '');
-          }).filter(Boolean);
-        } catch (_) {}
-        const want = String(requiredSerial).toUpperCase().replace(/[\s:]+/g, '');
-        if (!serials.includes(want)) {
-          throw new Error(`SERIAL_KHONG_KHOP: token dang cam khong co cert ${want}`);
-        }
-      }
-
-      // 3. Ky — van trong cung mutex, khong ai chen
-      const signer = this._buildPdfSigner(o);
-      return this._callNow(FN.SignPDF, [pdfB64, JSON.stringify(signer)], this.cfg.signTimeoutMs);
-    });
+  async signPdf(pdfB64, o = {}) {
+    return signPdfNative(this.cfg, pdfB64, o);
   }
 
-  /** Tach phan dung PdfSigner object de signPdf va signPdfAtomic dung chung. */
-  _buildPdfSigner(o = {}) {
-    const c = this.cfg;
-    const rawImage = o.imageBase64 || c.signatureImageBase64 || null;
-    const cleanImage = typeof rawImage === 'string'
-      ? rawImage.replace(/^data:image\/[a-z]+;base64,/i, '')
-      : null;
-
-    return {
-      page: o.page ?? 1,
-      llx: o.llx ?? 380, lly: o.lly ?? 40, urx: o.urx ?? 560, ury: o.ury ?? 110,
-      SigTextSize: o.sigTextSize ?? 8,
-      Signer: o.signer ?? null,
-      SignerPosition: o.signerPosition ?? null,
-      SigningTime: null,
-      Description: o.description ?? null,
-      ImageBase64: cleanImage,
-      OnlyDescription: o.onlyDescription === true,
-      ValidationOption: true, SigColorRGB: null,
-      SetImageBackground: o.setImageBackground === true,
-      PagesArray: null,
-      CertificateSerial: o.certificateSerial || c.certificateSerial || null,
-      TsaUrl: c.tsaUrl || null,
-      TsaUsername: c.tsaUsername || null,
-      TsaPassword: c.tsaPassword || null,
-      AdvancedCustom: false,
-      SigType: o.sigType ?? 2,
-      IsEncyptFile: false, EncryptPassword: null,
-      SigVisible: o.visible !== false, SigSignerVisible: true,
-      SigEmailVisible: false, SigPositionVisible: false, SigSigningTimeVisible: true,
-    };
+  async signXml(xml, o = {}) {
+    return signXmlNative(this.cfg, xml, o);
   }
 
-  signPdf(pdfB64, o = {}) {
-    return this.call(FN.SignPDF, [pdfB64, JSON.stringify(this._buildPdfSigner(o))], this.cfg.signTimeoutMs);
-  }
-
-  // (_signPdfOld da xoa — dung _buildPdfSigner + signPdf/signPdfAtomic)
-
-  /**
-   * Ky XML. Plugin ho tro chu ky XMLDSig (Enveloped/Enveloping/Detached).
-   *
-   * @param xml   noi dung XML dang chuoi (KHONG phai base64)
-   * @param o     tuy chon:
-   *   signingType   "Enveloped" (mac dinh) | "Enveloping" | "Detached"
-   *   digestMethod  "SHA256" (mac dinh) | "SHA1"
-   *   tagSigning        ten the muon ky (null = ca tai lieu)
-   *   nodeToSign        XPath node can ky
-   *   tagSaveResult     the de luu chu ky
-   *   parentTagSigning  the cha
-   *   certificateSerial serial cert
-   * @returns chuoi XML da ky (giai ma tu base64 trong .data)
-   */
-  signXml(xml, o = {}) {
-    const c = this.cfg;
-    const signer = {
-      TagSigning: o.tagSigning ?? null,
-      NodeToSign: o.nodeToSign ?? null,
-      TagSaveResult: o.tagSaveResult ?? null,
-      ParrentTagSigning: o.parentTagSigning ?? null,   // giu nguyen chinh ta cua SDK
-      NameXPathFilter: o.nameXPathFilter ?? null,
-      NameIDTimeSignature: o.nameIdTimeSignature ?? null,
-      DsSignature: o.dsSignature ?? false,
-      SigningType: o.signingType ?? 'Enveloped',
-      SigningTime: o.signingTime ?? null,              // "HH:mm:ss dd/MM/yyyy"
-      CertificateSerial: o.certificateSerial || c.certificateSerial || null,
-      ValidateBefore: o.validateBefore ?? false,
-      // Mac dinh SHA256 (SDK mac dinh SHA1 — cu nhung SHA256 an toan hon)
-      DigestMethod: o.digestMethod ?? 'SHA256',
-      SignatureMethod: o.signatureMethod ?? 'RSAwithSHA256',
-    };
-    return this.call(FN.SignXML, [xml, JSON.stringify(signer)], c.signTimeoutMs);
-  }
-
-  async forceRestartNativePlugin() {
-    if (process.platform !== 'win32') return;
-    log('warn', 'Phat hien VNPT-CA Plugin bi treo. Dang tien hanh khoi dong lai plugin...');
-    
-    // 1. Dong WS hien tai de giai phong ket noi
-    try { if (this.ws) this.ws.close(); } catch (_) {}
-    this.ws = null;
-    this.licensed = false;
-
-    // 2. Kill tien trinh cu
-    const procName = this.cfg.pluginProcessName || 'VNPT-CA Plugin.exe';
-    log('warn', `Dang tat tien trinh plugin bi treo: ${procName}...`);
-    await new Promise((resolve) => {
-      const k = spawn('taskkill', ['/F', '/IM', procName], { windowsHide: true });
-      k.on('exit', () => resolve());
-    });
-
-    // 3. Cho 1 giay de OS giai phong port
-    await new Promise((r) => setTimeout(r, 1000));
-    
-    // 4. Khoi dong lai plugin
-    this.tryStartNativePlugin();
-  }
+  forceRestartNativePlugin() {}
 }
 
 /* ================================================================== */
@@ -1193,6 +800,7 @@ class Tunnel {
     this.retries = 0;
     this.stopping = false;
     this.mode = this.cfg.token ? 'named' : 'quick';
+    this.reconnectTimer = null;
   }
 
   /** Tim cloudflared.exe: config -> canh file exe -> PATH he thong */
@@ -1202,6 +810,27 @@ class Tunnel {
     const beside = path.join(APP_DIR, name);
     if (fs.existsSync(beside)) return beside;
     return name; // thu tim trong PATH
+  }
+
+  scheduleReconnect() {
+    if (this.reconnectTimer) return;
+    log('warn', 'Phat hien loi ket noi tunnel. Se tu dong restart tunnel sau 30s neu khong phuc hoi...');
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      if (this.proc) {
+        log('warn', 'Tunnel bi treo hoac mat ket noi qua 30s. Tien hanh restart...');
+        this.proc.kill();
+      }
+    }, 30000);
+    if (this.reconnectTimer.unref) this.reconnectTimer.unref();
+  }
+
+  clearReconnectTimer() {
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+      log('info', 'Tunnel da ket noi lai thanh cong. Da xoa timer restart.');
+    }
   }
 
   start() {
@@ -1245,6 +874,7 @@ class Tunnel {
         this.hostname = quick[1];
         this.state = 'up';
         this.retries = 0;
+        this.clearReconnectTimer();
         console.log('');
         log('ok', `Tunnel san sang: https://${this.hostname}`);
         
@@ -1264,11 +894,13 @@ class Tunnel {
           this.retries = 0;
           log('ok', 'Cloudflare Tunnel: da ket noi');
         }
+        this.clearReconnectTimer();
         return;
       }
 
-      if (/ERR |error=|failed/i.test(line)) {
+      if (/ERR |error=|failed|lookup|dial tcp|connection closed|lost connection/i.test(line)) {
         log('warn', `cloudflared: ${line.trim().slice(0, 160)}`);
+        this.scheduleReconnect();
       }
     };
 
@@ -1284,6 +916,7 @@ class Tunnel {
 
     this.proc.on('exit', (code) => {
       this.proc = null;
+      this.clearReconnectTimer();
       try {
         fs.unlinkSync(path.join(BASE_DIR, 'tunnel_url.txt'));
       } catch (_) {}
@@ -1301,6 +934,7 @@ class Tunnel {
 
   stop() {
     this.stopping = true;
+    this.clearReconnectTimer();
     if (this.proc) {
       log('info', 'Dang tat Cloudflare Tunnel...');
       this.proc.kill();
@@ -1630,7 +1264,7 @@ async function signPdfNative(cfg, pdfBase64, opts) {
     const { execFile } = require('node:child_process');
     try {
       await new Promise((resolve, reject) => {
-        execFile(exePath, args, { windowsHide: false, timeout: cfg.signTimeoutMs, killSignal: 'SIGKILL' }, (err, stdout, stderr) => {
+        execFile(exePath, args, { windowsHide: true, timeout: cfg.signTimeoutMs, killSignal: 'SIGKILL' }, (err, stdout, stderr) => {
           // Ghi de log debug de nguoi dung de kiem tra
           try {
             const debugLogPath = path.join(BASE_DIR, 'pdf-signer-debug.log');
@@ -1732,7 +1366,7 @@ async function signXmlNative(cfg, xmlString, opts) {
     const { execFile } = require('node:child_process');
     try {
       await new Promise((resolve, reject) => {
-        execFile(exePath, args, { windowsHide: false, timeout: cfg.signTimeoutMs, killSignal: 'SIGKILL' }, (err, stdout, stderr) => {
+        execFile(exePath, args, { windowsHide: true, timeout: cfg.signTimeoutMs, killSignal: 'SIGKILL' }, (err, stdout, stderr) => {
           if (err) {
             log('error', `Loi khi thuc thi pdf-signer.exe de ky XML:\nStdout: ${stdout}\nStderr: ${stderr}`);
             const errorMsg = stderr.trim() || stdout.trim() || err.message;
@@ -1912,20 +1546,12 @@ td{padding:7px 4px;border-bottom:1px solid #eee}td:first-child{color:#777;width:
 
       /* ---- Health: khong can token, de HIS kiem tra truoc khi hien nut Ky ---- */
       if (req.method === 'GET' && p === '/v2/health') {
-        let token = 'unknown';
-        if (cfg.useNativeSigner) {
-          const serial = cfg.certificateSerial;
-          const present = checkCertPresent(serial);
-          token = present ? 'present' : 'absent';
-        } else {
-          try {
-            const t = await plugin.checkToken();
-            token = t.present ? 'present' : 'absent';   // "0" = khong co token
-          } catch (_) { token = 'unknown'; }
-        }
+        const serial = cfg.certificateSerial;
+        const present = checkCertPresent(serial);
+        const token = present ? 'present' : 'absent';
         return json(res, 200, {
-          ok: cfg.useNativeSigner ? (token === 'present') : (plugin.connected && token === 'present'),
-          plugin: cfg.useNativeSigner ? 'connected' : (plugin.connected ? 'connected' : 'disconnected'),
+          ok: present,
+          plugin: 'connected',
           token,
           tunnel: tunnel.state,
           queueDepth: queue.depth,
@@ -2046,11 +1672,7 @@ td{padding:7px 4px;border-bottom:1px solid #eee}td:first-child{color:#777;width:
         log('info', `sign-file: ${filePart.length} byte, trang ${opts.page}`);
         let signedB64;
         try {
-          if (cfg.useNativeSigner) {
-            signedB64 = await mutex.run(() => signPdfNative(cfg, filePart.toString('base64'), opts));
-          } else {
-            signedB64 = await mutex.run(() => plugin.signPdf(filePart.toString('base64'), opts));
-          }
+          signedB64 = await mutex.run(() => signPdfNative(cfg, filePart.toString('base64'), opts));
         } catch (e) {
           return json(res, 500, { error: e.message });
         }
@@ -2069,13 +1691,7 @@ td{padding:7px 4px;border-bottom:1px solid #eee}td:first-child{color:#777;width:
 
       // ===== KY HOP NHAT: PDF hoac XML, phan biet bang docType =====
       if (req.method === 'POST' && p === '/v2/sign') {
-        try {
-          if (!cfg.useNativeSigner && !plugin.connected) {
-            await plugin.ensureReady();
-          }
-        } catch (e) {
-          return json(res, 503, { error: `PLUGIN_KHONG_SAN_SANG: ${e.message}` });
-        }
+
 
         const body = JSON.parse((await readBody(req, cfg.maxPdfBytes * 2)).toString());
 
@@ -2123,15 +1739,8 @@ td{padding:7px 4px;border-bottom:1px solid #eee}td:first-child{color:#777;width:
 
           let signedB64;
           try {
-            if (cfg.useNativeSigner) {
-              signedB64 = await mutex.run(() => signPdfNative(cfg, body.document, opts));
-            } else {
-              // NGUYEN TU: kiem token + verify serial (khong cache) + ky, trong 1 mutex.
-              // Serial cua USB da rut se bi tu choi ngay tai buoc verify.
-              signedB64 = await plugin.signPdfAtomic(body.document, opts, reqSerial || null);
-            }
+            signedB64 = await mutex.run(() => signPdfNative(cfg, body.document, opts));
           } catch (e) {
-            if (!cfg.useNativeSigner) plugin.invalidateTokenCache();  // co the token da bi rut -> xoa cache
             audit(cfg, { type: 'sign.fail', docType: 'pdf', user: claim.sub, sha256: sha, error: e.message });
             return json(res, /TOKEN/.test(e.message) ? 503 : 500, { error: e.message });
           }
@@ -2162,13 +1771,8 @@ td{padding:7px 4px;border-bottom:1px solid #eee}td:first-child{color:#777;width:
 
         let signedB64;
         try {
-          if (cfg.useNativeSigner) {
-            signedB64 = await mutex.run(() => signXmlNative(cfg, xml, opts));
-          } else {
-            signedB64 = await plugin.signXml(xml, opts);
-          }
+          signedB64 = await mutex.run(() => signXmlNative(cfg, xml, opts));
         } catch (e) {
-          if (!cfg.useNativeSigner) plugin.invalidateTokenCache();
           audit(cfg, { type: 'sign.fail', docType: 'xml', user: claim.sub, error: e.message });
           return json(res, /TOKEN/.test(e.message) ? 503 : 500, { error: e.message });
         }
@@ -2657,40 +2261,19 @@ async function main() {
     console.log('  ============================================\n');
   }
 
-  if (await plugin.connect()) {
-    await plugin.warmup();
-    try {
-      const t = await plugin.checkToken();
-      if (t.present) log('ok', `USB token: da phat hien (CheckToken = ${t.raw})`);
-      else {
-        log('warn', 'Chua co USB Token. Cam vao la ky duoc ngay, khong can khoi dong lai.');
-      }
-    } catch (e) {
-      log('warn', `Khong goi duoc CheckToken: ${e.message}`);
+  await plugin.connect();
+  try {
+    const t = await plugin.checkToken();
+    if (t.present) log('ok', 'USB token: da phat hien.');
+    else {
+      log('warn', 'Chua co USB Token. Cam vao la ky duoc ngay, khong can khoi dong lai.');
     }
-  } else {
-    log('warn', 'Chua ket noi duoc VNPT-CA Plugin. Dang thu tu khoi dong plugin...');
-    plugin.tryStartNativePlugin();
-    // cho plugin khoi dong roi thu lai
-    setTimeout(async () => {
-      if (await plugin.connect()) {
-        await plugin.warmup();
-        log('ok', 'Da tu khoi dong va ket noi VNPT-CA Plugin.');
-      } else {
-        log('error', 'Van chua ket noi duoc plugin. Kiem tra plugin da cai chua.');
-        log('error', `Da thu cac port: ${cfg.pluginPorts.join(', ')}`);
-      }
-    }, 4000);
+  } catch (e) {
+    log('warn', `Khong kiem tra duoc USB Token: ${e.message}`);
   }
 
-  // Theo doi lien tuc: tu ket noi lai plugin, tu bao khi rut/cam USB.
-  // Khong can tat/bat lai tool khi thay doi phan cung.
+  // Theo doi lien tuc: tu bao khi rut/cam USB.
   plugin.startMonitor(4000);
-  setInterval(() => {
-    if (!plugin.connected && !plugin.busy && !plugin._reconnecting) {
-      plugin.connect().then((ok) => ok && plugin.warmup()).catch(() => {});
-    }
-  }, 15e3).unref();
 
   const server = http.createServer(makeHandler(cfg, plugin, queue, tunnel, lock, mutex));
   server.listen(cfg.port, cfg.host, () => {
