@@ -434,7 +434,11 @@ class Program
         {
             string msg = ex.Message;
             Console.Error.WriteLine($"[DEBUG_RAW_ERR] {ex.ToString()}");
-            if (msg.Contains("wrong PIN") || msg.Contains("incorrect PIN") || msg.Contains("PIN was presented") || msg.Contains("0x8009001A") || msg.Contains("context was acquired as silent"))
+            if (msg.Contains("0x000000A4") || msg.Contains("PIN_LOCKED"))
+            {
+                Console.Error.WriteLine("PIN_LOCKED: Ma PIN cua USB Token da bi KHOA do nhap sai nhieu lan. Vui long dung phan mem Quan ly Token de mo khoa PIN.");
+            }
+            else if (msg.Contains("wrong PIN") || msg.Contains("incorrect PIN") || msg.Contains("PIN was presented") || msg.Contains("0x8009001A") || msg.Contains("context was acquired as silent"))
             {
                 Console.Error.WriteLine("WRONG_PIN: Ma PIN cua USB Token khong chinh xac hoac thieu ma PIN.");
             }

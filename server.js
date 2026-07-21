@@ -1666,6 +1666,7 @@ td{padding:7px 4px;border-bottom:1px solid #eee}td:first-child{color:#777;width:
           urx: f.urx !== undefined ? Number(f.urx) : undefined,
           ury: f.ury !== undefined ? Number(f.ury) : undefined,
           description: f.description || null,
+          pin: f.pin || undefined,
         };
         if (sr.serial) opts.certificateSerial = sr.serial;
 
@@ -1729,6 +1730,7 @@ td{padding:7px 4px;border-bottom:1px solid #eee}td:first-child{color:#777;width:
           if (pdf.subarray(0, 4).toString() !== '%PDF') return json(res, 400, { error: 'khong phai PDF hop le' });
 
           const opts = { ...sig };
+          if (body.pin && !opts.pin) opts.pin = body.pin;
           if (reqSerial) opts.certificateSerial = reqSerial;
 
           const sha = crypto.createHash('sha256').update(pdf).digest('hex');
@@ -1762,6 +1764,7 @@ td{padding:7px 4px;border-bottom:1px solid #eee}td:first-child{color:#777;width:
         }
 
         const opts = { ...sig };
+        if (body.pin && !opts.pin) opts.pin = body.pin;
         if (srXml.serial) opts.certificateSerial = srXml.serial;
 
         const sha = crypto.createHash('sha256').update(xml, 'utf8').digest('hex');
