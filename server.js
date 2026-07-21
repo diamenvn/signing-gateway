@@ -1476,6 +1476,38 @@ function normalizeSerial(s) {
  *
  * Tra ve { ok, serial, error }.
  */
+/**
+ * Giai ma ma PIN tu request dua tren cong thuc AES/GCM/NoPadding (Java SmartCAEncryptionService).
+ * Ho tro khoa pinSecretKey hoac hisSharedSecret.
+ */
+function decryptPinAES_GCM(encryptedPayloadB64, keyString) {
+  if (!encryptedPayloadB64 || !keyString) return encryptedPayloadB64;
+  try {
+    const payload = Buffer.from(encryptedPayloadB64, 'base64');
+    if (payload.length < 12 + 16) return encryptedPayloadB64;
+
+    const keyBytes = Buffer.from(keyString, 'utf8');
+    let algo = 'aes-256-gcm';
+    if (keyBytes.length === 16) algo = 'aes-128-gcm';
+    else if (keyBytes.length === 24) algo = 'aes-192-gcm';
+    else if (keyBytes.length === 32) algo = 'aes-256-gcm';
+
+    const iv = payload.subarray(0, 12);
+    const authTag = payload.subarray(payload.length - 16);
+    const ciphertext = payload.subarray(12, payload.length - 16);
+
+    const decipher = crypto.createDecipheriv(algo, keyBytes, iv);
+    decipher.setAuthTag(authTag);
+
+    let decrypted = decipher.update(ciphertext, undefined, 'utf8');
+    decrypted += decipher.final('utf8');
+    log('info', '[DECRYPT_PIN] Giai ma ma PIN (AES/GCM/NoPadding) thanh cong.');
+    return decrypted;
+  } catch (e) {
+    return encryptedPayloadB64;
+  }
+}
+
 const pinFormatCache = {};
 
 async function signPdfNative(cfg, pdfBase64, opts) {
@@ -1526,7 +1558,9 @@ async function signPdfNative(cfg, pdfBase64, opts) {
     }
 
     // Lay PIN tu request, neu khong co thi dung defaultPin trong config
-    const pin = opts.pin || cfg.defaultPin || '';
+    const rawPin = opts.pin || cfg.defaultPin || '';
+    const pinKey = cfg.hisSharedSecret || '';
+    const pin = decryptPinAES_GCM(rawPin, pinKey);
 
     // 4. Chuan bi tham so cho executable
     const args = [
@@ -1678,7 +1712,9 @@ async function signXmlNative(cfg, xmlString, opts) {
       throw new Error('THIEU_SERIAL: request phai gui certificateSerial hoac cau hinh mac dinh');
     }
 
-    const pin = opts.pin || cfg.defaultPin || '';
+    const rawPin = opts.pin || cfg.defaultPin || '';
+    const pinKey = cfg.hisSharedSecret || '';
+    const pin = decryptPinAES_GCM(rawPin, pinKey);
 
     const args = [
       '--xml',
