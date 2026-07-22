@@ -78,6 +78,10 @@ Filename: "{app}\{#ExeName}"; Parameters: "--uninstall"; \
   WorkingDir: "{app}"; \
   Flags: runhidden waituntilterminated
 
+[InstallDelete]
+Type: files; Name: "{commonstartup}\Signer Gateway.lnk"
+Type: files; Name: "{userstartup}\Signer Gateway.lnk"
+
 [UninstallDelete]
 Type: files; Name: "{commonstartup}\Signer Gateway.lnk"
 Type: files; Name: "{app}\run-hidden.vbs"
