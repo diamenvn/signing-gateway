@@ -75,6 +75,12 @@ export async function signPdf(pdf, opts = {}) {
         pin: opts.pin ?? undefined,
         color: opts.color ?? undefined,
         sigTextSize: opts.sigTextSize ?? undefined,
+        signMark: opts.signMark ?? opts.signmark ?? undefined,
+        smWidth: opts.smWidth ?? opts.width ?? undefined,
+        smHeight: opts.smHeight ?? opts.height ?? undefined,
+        smOffsetX: opts.smOffsetX ?? opts.offsetX ?? undefined,
+        smOffsetY: opts.smOffsetY ?? opts.offsetY ?? undefined,
+        smCenter: opts.smCenter ?? opts.center ?? undefined,
       },
     }),
   });

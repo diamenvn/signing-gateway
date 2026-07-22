@@ -25,6 +25,7 @@
   "tunnel": {
     "enabled": true,
     "token": "",
+    "hostname": "",
     "exePath": ""
   },
   "telegram": {

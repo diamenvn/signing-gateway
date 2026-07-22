@@ -1,28 +1,14 @@
-<<<<<<< Updated upstream
-/dist
-/bin
-/installer
-/node-modules
-=======
-# Dependencies
 node_modules/
-
-# Build outputs
 /dist/
 /bin/
 /native-signer/bin/
 /native-signer/obj/
-
-# Executables and large binaries
 *.exe
 *.pdb
-
-# Temp files and Logs
 /temp/
 *.log
+*.pdf
 tunnel_url.txt
-
-# OS generated files
 .DS_Store
 Thumbs.db
->>>>>>> Stashed changes
+cloudflared.exe

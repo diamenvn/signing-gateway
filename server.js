@@ -796,7 +796,7 @@ class Tunnel {
     this.port = cfg.port;
     this.proc = null;
     this.state = 'off';          // off | starting | up | retrying | error
-    this.hostname = null;
+    this.hostname = this.cfg.hostname || null;
     this.retries = 0;
     this.stopping = false;
     this.mode = this.cfg.token ? 'named' : 'quick';
@@ -892,7 +892,11 @@ class Tunnel {
         if (this.state !== 'up') {
           this.state = 'up';
           this.retries = 0;
-          log('ok', 'Cloudflare Tunnel: da ket noi');
+          if (this.hostname) {
+            log('ok', `Cloudflare Tunnel: da ket noi. URL: https://${this.hostname}`);
+          } else {
+            log('ok', 'Cloudflare Tunnel: da ket noi');
+          }
         }
         this.clearReconnectTimer();
         return;
@@ -1238,21 +1242,27 @@ async function signPdfNative(cfg, pdfBase64, opts) {
       args.push('--tsize', String(tsize));
     }
 
-    const signmark = opts.signmark || '';
+    const signmark = opts.signmark || opts.signMark || opts.sign_mark || '';
     if (signmark) {
       args.push('--signmark', signmark);
-      if (typeof opts.width === 'number' || typeof opts.width === 'string') {
-        args.push('--smwidth', String(opts.width));
+      const smWidth = opts.smwidth ?? opts.smWidth ?? opts.width ?? opts.sm_width;
+      if (smWidth !== undefined && smWidth !== null && smWidth !== '') {
+        args.push('--smwidth', String(smWidth));
       }
-      if (typeof opts.height === 'number' || typeof opts.height === 'string') {
-        args.push('--smheight', String(opts.height));
+      const smHeight = opts.smheight ?? opts.smHeight ?? opts.height ?? opts.sm_height;
+      if (smHeight !== undefined && smHeight !== null && smHeight !== '') {
+        args.push('--smheight', String(smHeight));
       }
-      if (typeof opts.offsetX === 'number' || typeof opts.offsetX === 'string') {
-        args.push('--smoffsetx', String(opts.offsetX));
+      const smOffsetX = opts.smoffsetx ?? opts.smOffsetX ?? opts.offsetX ?? opts.sm_offset_x;
+      if (smOffsetX !== undefined && smOffsetX !== null && smOffsetX !== '') {
+        args.push('--smoffsetx', String(smOffsetX));
       }
-      if (typeof opts.offsetY === 'number' || typeof opts.offsetY === 'string') {
-        args.push('--smoffsety', String(opts.offsetY));
+      const smOffsetY = opts.smoffsety ?? opts.smOffsetY ?? opts.offsetY ?? opts.sm_offset_y;
+      if (smOffsetY !== undefined && smOffsetY !== null && smOffsetY !== '') {
+        args.push('--smoffsety', String(smOffsetY));
       }
+      const smCenter = opts.smcenter ?? opts.smCenter ?? opts.center ?? (opts.align === 'center') ?? true;
+      args.push('--smcenter', smCenter === false ? 'false' : 'true');
     }
 
     const forceCng = opts.forceCng ?? cfg.forceCng ?? true;
@@ -1271,7 +1281,7 @@ async function signPdfNative(cfg, pdfBase64, opts) {
     const { execFile } = require('node:child_process');
     try {
       await new Promise((resolve, reject) => {
-        execFile(exePath, args, { windowsHide: true, timeout: cfg.signTimeoutMs, killSignal: 'SIGKILL' }, (err, stdout, stderr) => {
+        execFile(exePath, args, { windowsHide: false, timeout: cfg.signTimeoutMs, killSignal: 'SIGKILL' }, (err, stdout, stderr) => {
           // Ghi de log debug de nguoi dung de kiem tra
           try {
             const debugLogPath = path.join(BASE_DIR, 'pdf-signer-debug.log');
@@ -1373,7 +1383,7 @@ async function signXmlNative(cfg, xmlString, opts) {
     const { execFile } = require('node:child_process');
     try {
       await new Promise((resolve, reject) => {
-        execFile(exePath, args, { windowsHide: true, timeout: cfg.signTimeoutMs, killSignal: 'SIGKILL' }, (err, stdout, stderr) => {
+        execFile(exePath, args, { windowsHide: false, timeout: cfg.signTimeoutMs, killSignal: 'SIGKILL' }, (err, stdout, stderr) => {
           if (err) {
             log('error', `Loi khi thuc thi pdf-signer.exe de ky XML:\nStdout: ${stdout}\nStderr: ${stderr}`);
             const errorMsg = stderr.trim() || stdout.trim() || err.message;

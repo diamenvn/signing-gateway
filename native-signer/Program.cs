@@ -38,18 +38,32 @@ class Program
         float smHeight = 75f;
         float smOffsetX = 0f;
         float smOffsetY = -45f;
+        bool hasOffsetX = false;
+        bool hasOffsetY = false;
 
         string pinFormat = null;
         bool forceCng = false;
         bool listOnly = false;
         bool testPkcs11 = false;
         bool xmlMode = false;
+        bool smCenter = true;
         for (int i = 0; i < args.Length; i++)
         {
             if (args[i] == "--list") listOnly = true;
             else if (args[i] == "--test-pkcs11") testPkcs11 = true;
             else if (args[i] == "--xml") xmlMode = true;
             else if (args[i] == "--force-cng") forceCng = true;
+            else if (args[i] == "--smcenter")
+            {
+                if (i + 1 < args.Length && (args[i + 1].ToLower() == "true" || args[i + 1].ToLower() == "false"))
+                {
+                    bool.TryParse(args[++i], out smCenter);
+                }
+                else
+                {
+                    smCenter = true;
+                }
+            }
             else if (args[i] == "--input" && i + 1 < args.Length) input = args[++i];
             else if (args[i] == "--output" && i + 1 < args.Length) output = args[++i];
             else if (args[i] == "--serial" && i + 1 < args.Length) serial = args[++i];
@@ -66,9 +80,15 @@ class Program
             else if (args[i] == "--signmark" && i + 1 < args.Length) signmark = args[++i];
             else if (args[i] == "--smwidth" && i + 1 < args.Length) float.TryParse(args[++i], out smWidth);
             else if (args[i] == "--smheight" && i + 1 < args.Length) float.TryParse(args[++i], out smHeight);
-            else if (args[i] == "--smoffsetx" && i + 1 < args.Length) float.TryParse(args[++i], out smOffsetX);
-            else if (args[i] == "--smoffsety" && i + 1 < args.Length) float.TryParse(args[++i], out smOffsetY);
+            else if (args[i] == "--smoffsetx" && i + 1 < args.Length) { float.TryParse(args[++i], out smOffsetX); hasOffsetX = true; }
+            else if (args[i] == "--smoffsety" && i + 1 < args.Length) { float.TryParse(args[++i], out smOffsetY); hasOffsetY = true; }
             else if (args[i] == "--pin-format" && i + 1 < args.Length) pinFormat = args[++i];
+        }
+
+        if (smCenter)
+        {
+            if (!hasOffsetX) smOffsetX = 0f;
+            if (!hasOffsetY) smOffsetY = 0f;
         }
 
         if (listOnly)
@@ -392,7 +412,6 @@ class Program
             Console.WriteLine($"[INFO] Dang tim chung thu voi Serial: {serial}...");
             X509Certificate2 cert = FindCertificate(serial);
             string matchedPkcs11Dll = null;
-
             Console.WriteLine("[INFO] Dang quet tim driver PKCS#11 phu hop de tu dong tranh hop thoai PIN...");
             string foundDll = null;
             var certPkcs = FindCertificateInPkcs11(serial, pin, out foundDll);
@@ -414,7 +433,7 @@ class Program
                 {
                     Console.WriteLine($"[INFO] Dang tien hanh ky file PDF bang PKCS#11: {input} -> {output}...");
                     SignPdf(input, output, cert, pin, page, llx, lly, urx, ury, desc, image, colorStr, tsize,
-                            signmark, smWidth, smHeight, smOffsetX, smOffsetY, forceCng, matchedPkcs11Dll, pinFormat);
+                            signmark, smWidth, smHeight, smOffsetX, smOffsetY, forceCng, matchedPkcs11Dll, pinFormat, smCenter);
                     Console.WriteLine("[INFO] Ky so bang PKCS#11 thanh cong!");
                     ForceExit(0);
                 }
@@ -426,7 +445,7 @@ class Program
 
             Console.WriteLine($"[INFO] Dang tien hanh ky file PDF bang CNG/CAPI: {input} -> {output}...");
             SignPdf(input, output, cert, pin, page, llx, lly, urx, ury, desc, image, colorStr, tsize,
-                    signmark, smWidth, smHeight, smOffsetX, smOffsetY, forceCng, null, pinFormat);
+                    signmark, smWidth, smHeight, smOffsetX, smOffsetY, forceCng, null, pinFormat, smCenter);
             Console.WriteLine("[INFO] Ky so bang CNG/CAPI thanh cong!");
             ForceExit(0);
         }
@@ -509,7 +528,8 @@ class Program
         float smOffsetY,
         bool forceCng,
         string forcePkcs11DllPath = null,
-        string pinFormat = null)
+        string pinFormat = null,
+        bool smCenter = false)
     {
         Console.WriteLine("[DEBUG] Bat dau SignPdf...");
         // 1. Dung chuoi chung thu (cert chain)
@@ -542,40 +562,89 @@ class Program
 
         // 3. Mo va tao chu ky PDF
         using (PdfReader reader = new PdfReader(inputPath))
-        using (FileStream os = new FileStream(outputPath, FileMode.Create))
-        using (PdfStamper stamper = PdfStamper.CreateSignature(reader, os, '\0'))
         {
-            Console.WriteLine("[DEBUG] Da mo PdfReader, FileStream, PdfStamper...");
-            PdfSignatureAppearance appearance = stamper.SignatureAppearance;
-
             int targetPage = page;
             float actualLlx = llx;
             float actualLly = lly;
             float actualUrx = urx;
             float actualUry = ury;
+            string targetFieldName = "Signature_" + Guid.NewGuid().ToString("N").Substring(0, 8);
 
             if (!string.IsNullOrEmpty(signmark))
             {
                 Console.WriteLine($"[INFO] Dang tim kiem vi tri signmark: '{signmark}'...");
-                var finder = new TextAnchorFinder(signmark);
                 bool found = false;
-                int totalPages = reader.NumberOfPages;
-                for (int pNum = 1; pNum <= totalPages; pNum++)
-                {
-                    finder.SetPage(pNum);
-                    iTextSharp.text.pdf.parser.PdfReaderContentParser parser = new iTextSharp.text.pdf.parser.PdfReaderContentParser(reader);
-                    parser.ProcessContent(pNum, finder);
 
-                    if (finder.FoundX.HasValue && finder.FoundY.HasValue)
+                // 1. Kiem tra xem signmark co phai la ten mot AcroForm field trong PDF khong
+                try
+                {
+                    var fieldPositions = reader.AcroFields.GetFieldPositions(signmark);
+                    if (fieldPositions != null && fieldPositions.Count > 0)
                     {
-                        targetPage = finder.FoundPage;
-                        actualLlx = finder.FoundX.Value + smOffsetX;
-                        actualLly = finder.FoundY.Value + smOffsetY;
+                        var pos = fieldPositions[0];
+                        targetPage = pos.page;
+                        float markWidth = pos.position.Width;
+                        float markHeight = pos.position.Height;
+
+                        if (smCenter)
+                        {
+                            actualLlx = pos.position.Left + (markWidth / 2f) - (smWidth / 2f) + smOffsetX;
+                            actualLly = pos.position.Bottom + (markHeight / 2f) - (smHeight / 2f) + smOffsetY;
+                        }
+                        else
+                        {
+                            actualLlx = pos.position.Left + smOffsetX;
+                            actualLly = pos.position.Bottom + smOffsetY;
+                        }
+
                         actualUrx = actualLlx + smWidth;
                         actualUry = actualLly + smHeight;
+                        targetFieldName = signmark;
                         found = true;
-                        Console.WriteLine($"[INFO] Da tim thay signmark tai Page {targetPage}, X={finder.FoundX.Value}, Y={finder.FoundY.Value}. Toa do ky: llx={actualLlx}, lly={actualLly}, urx={actualUrx}, ury={actualUry}");
-                        break;
+                        Console.WriteLine($"[INFO] Da tim thay signmark duoi dang AcroField '{signmark}' tai Page {targetPage}, X={pos.position.Left}, Y={pos.position.Bottom}. Toa do ky: llx={actualLlx}, lly={actualLly}, urx={actualUrx}, ury={actualUry}");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[DEBUG] Kiem tra AcroFields loi: {ex.Message}");
+                }
+
+                // 2. Neu khong phai AcroField, tim theo noi dung chu (Text Anchor Search)
+                if (!found)
+                {
+                    var finder = new TextAnchorFinder(signmark);
+                    int totalPages = reader.NumberOfPages;
+                    for (int pNum = 1; pNum <= totalPages; pNum++)
+                    {
+                        finder.SetPage(pNum);
+                        iTextSharp.text.pdf.parser.PdfReaderContentParser parser = new iTextSharp.text.pdf.parser.PdfReaderContentParser(reader);
+                        parser.ProcessContent(pNum, finder);
+                        finder.OnPageEnd();
+
+                        if (finder.FoundX.HasValue && finder.FoundY.HasValue)
+                        {
+                            targetPage = finder.FoundPage;
+                            float markWidth = (finder.FoundEndX ?? finder.FoundX.Value) - finder.FoundX.Value;
+                            float markHeight = finder.FoundHeight ?? 10f;
+
+                            if (smCenter)
+                            {
+                                actualLlx = finder.FoundX.Value + (markWidth / 2f) - (smWidth / 2f) + smOffsetX;
+                                actualLly = finder.FoundY.Value + (markHeight / 2f) - (smHeight / 2f) + smOffsetY;
+                            }
+                            else
+                            {
+                                actualLlx = finder.FoundX.Value + smOffsetX;
+                                actualLly = finder.FoundY.Value + smOffsetY;
+                            }
+
+                            actualUrx = actualLlx + smWidth;
+                            actualUry = actualLly + smHeight;
+                            targetFieldName = "Signature_" + Guid.NewGuid().ToString("N").Substring(0, 8);
+                            found = true;
+                            Console.WriteLine($"[INFO] Da tim thay signmark tai Page {targetPage}, X={finder.FoundX.Value}, Y={finder.FoundY.Value}. Toa do ky: llx={actualLlx}, lly={actualLly}, urx={actualUrx}, ury={actualUry}");
+                            break;
+                        }
                     }
                 }
 
@@ -584,9 +653,22 @@ class Program
                     throw new Exception($"SIGNMARK_NOT_FOUND: Khong tim thay tu khoa signmark '{signmark}' trong file PDF.");
                 }
             }
-            
-            // Thiet lap vi tri chu ky visible
-            appearance.SetVisibleSignature(new iTextSharp.text.Rectangle(actualLlx, actualLly, actualUrx, actualUry), targetPage, null);
+
+            var existingSigs = reader.AcroFields.GetSignatureNames();
+            bool appendMode = existingSigs != null && existingSigs.Count > 0;
+            if (appendMode)
+            {
+                Console.WriteLine("[INFO] Phat hien PDF da co chu ky so. Kich hoat che do ky noi tiep (Append Mode)...");
+            }
+
+            using (FileStream os = new FileStream(outputPath, FileMode.Create))
+            using (PdfStamper stamper = PdfStamper.CreateSignature(reader, os, '\0', null, appendMode))
+            {
+                Console.WriteLine("[DEBUG] Da mo FileStream, PdfStamper...");
+                PdfSignatureAppearance appearance = stamper.SignatureAppearance;
+
+                // Thiet lap vi tri chu ky visible
+                appearance.SetVisibleSignature(new iTextSharp.text.Rectangle(actualLlx, actualLly, actualUrx, actualUry), targetPage, targetFieldName);
             
             // Build text thong tin nguoi ky
             string subjectCN = GetCertCN(cert);
@@ -748,16 +830,34 @@ class Program
                 }
             }
 
-            Font font = new Font(bf, tsize, Font.NORMAL, textColor);
-            ColumnText ct = new ColumnText(layer2);
-            float leading = tsize * 1.25f;
-            ct.SetSimpleColumn(new Phrase(text, font), textLeft, 0, w - 3, h - 2, leading, Element.ALIGN_LEFT);
-            ct.Go();
+             Font font = new Font(bf, tsize, Font.NORMAL, textColor);
+             float leading = tsize * 1.25f;
+             
+             // 1. Chay thu de do chieu cao thuc te cua khoi text sau khi tu dong xuong dong (Word Wrap)
+             ColumnText ctMeasure = new ColumnText(layer2);
+             ctMeasure.SetSimpleColumn(new Phrase(text, font), textLeft, 0, w - 3, h, leading, Element.ALIGN_LEFT);
+             ctMeasure.Go(true); // Che do mo phong
+             
+             float textHeight = h - ctMeasure.YLine;
+             float shift = (h - textHeight) / 2f;
+             if (shift < 0) shift = 0;
+             
+             float margin = 3f; // Khoang dem an toan tranh lam tron so lam mat chu
+             float yTop = h - shift + margin;
+             if (yTop > h) yTop = h;
+             float yBottom = yTop - textHeight - (margin * 2f);
+             if (yBottom < 0) yBottom = 0;
+ 
+             // 2. Ve thuc te voi toa do da can giua chinh xac
+             ColumnText ctDraw = new ColumnText(layer2);
+             ctDraw.SetSimpleColumn(new Phrase(text, font), textLeft, yBottom, w - 3, yTop, leading, Element.ALIGN_LEFT);
+             ctDraw.Go();
 
             // Thuc hien ky so detached CMS
             Console.WriteLine("[DEBUG] Dang goi MakeSignature.SignDetached...");
             MakeSignature.SignDetached(appearance, externalSignature, chain, null, null, null, 0, CryptoStandard.CMS);
             Console.WriteLine("[DEBUG] Da goi xong MakeSignature.SignDetached...");
+            }
         }
         Console.WriteLine("[DEBUG] Da dong va hoan tat PdfStamper.");
     }
@@ -767,7 +867,60 @@ class Program
         Console.WriteLine("[DEBUG] Bat dau SignXml...");
         XmlDocument xmlDoc = new XmlDocument();
         xmlDoc.PreserveWhitespace = true;
-        xmlDoc.Load(inputPath);
+        try
+        {
+            xmlDoc.Load(inputPath);
+        }
+        catch (XmlException xmlEx)
+        {
+            Console.WriteLine($"[INFO] Gap loi phan tich XML: {xmlEx.Message}. Tien hanh tu dong sua loi tuong thich HTML/XHTML (self-closing tags)...");
+            try
+            {
+                string rawText = File.ReadAllText(inputPath, Encoding.UTF8);
+                string pattern = @"<(meta|br|input|link|img|hr)(?:\s+([^>]*?))?\s*(?<!/)>";
+                string sanitized = System.Text.RegularExpressions.Regex.Replace(
+                    rawText,
+                    pattern,
+                    "<$1 $2 />",
+                    System.Text.RegularExpressions.RegexOptions.IgnoreCase
+                );
+                sanitized = System.Text.RegularExpressions.Regex.Replace(sanitized, @"\s+/>", " />");
+                
+                // Tu dong giai ma tat ca cac thuc the HTML (vi du &nbsp;, &deg;) ve ky tu Unicode goc, tru 5 thuc the co ban cua XML
+                sanitized = System.Text.RegularExpressions.Regex.Replace(sanitized, @"&[a-zA-Z0-9#]+;", match =>
+                {
+                    string entity = match.Value;
+                    string lower = entity.ToLower();
+                    if (lower == "&amp;" || lower == "&lt;" || lower == "&gt;" || lower == "&quot;" || lower == "&apos;")
+                    {
+                        return entity; // Giu nguyen 5 thuc the XML bat buoc
+                    }
+                    return System.Net.WebUtility.HtmlDecode(entity); // Giai ma cac thuc the HTML khac thanh ky tu Unicode goc
+                });
+
+                // Tu dong bao boc noi dung trong the <script> va <style> bang CDATA de tranh ky tu <, > gay loi XML
+                string scriptPattern = @"<(script|style)\b[^>]*>(.*?)</\1>";
+                sanitized = System.Text.RegularExpressions.Regex.Replace(
+                    sanitized,
+                    scriptPattern,
+                    match => {
+                        string tag = match.Groups[1].Value;
+                        string content = match.Groups[2].Value;
+                        if (content.Contains("<![CDATA[")) return match.Value;
+                        return $"<{tag}>\n//<![CDATA[\n" + content + $"\n//]]>\n</{tag}>";
+                    },
+                    System.Text.RegularExpressions.RegexOptions.Singleline | System.Text.RegularExpressions.RegexOptions.IgnoreCase
+                );
+                
+                xmlDoc.LoadXml(sanitized);
+                Console.WriteLine("[INFO] Tu dong sua va nap XML thanh cong.");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[ERROR] Tu dong sua XML that bai: {ex.Message}");
+                throw; // Quang lai loi phan tich thuc te de thong bao ro rang loi nam o dau
+            }
+        }
 
         string pkcs11DllPath = forcePkcs11DllPath; // Chỉ dùng PKCS#11 khi chứng thư không có trong Windows Store và phải quét qua PKCS#11
         RSA rsaKey = null;
@@ -2796,9 +2949,22 @@ public class Pkcs11Rsa : RSA
 
 public class TextAnchorFinder : iTextSharp.text.pdf.parser.IRenderListener
 {
+    private class CharInfo
+    {
+        public string Text;
+        public float X;
+        public float Y;
+        public float EndX;
+        public float Height;
+    }
+
     private readonly string _targetText;
+    private readonly List<CharInfo> _charList = new List<CharInfo>();
+
     public float? FoundX { get; private set; }
     public float? FoundY { get; private set; }
+    public float? FoundEndX { get; private set; }
+    public float? FoundHeight { get; private set; }
     public int FoundPage { get; private set; } = 1;
 
     public TextAnchorFinder(string targetText)
@@ -2806,23 +2972,172 @@ public class TextAnchorFinder : iTextSharp.text.pdf.parser.IRenderListener
         _targetText = targetText;
     }
 
+    public void SetPage(int page)
+    {
+        FoundPage = page;
+        FoundX = null;
+        FoundY = null;
+        FoundEndX = null;
+        FoundHeight = null;
+        _charList.Clear();
+    }
+
     public void RenderText(iTextSharp.text.pdf.parser.TextRenderInfo renderInfo)
     {
+        if (FoundX.HasValue || string.IsNullOrEmpty(_targetText)) return;
+
         string text = renderInfo.GetText();
-        if (text != null && text.Contains(_targetText))
+        if (string.IsNullOrEmpty(text)) return;
+
+        // Route 1: Chunk truyen thong chua khap tu khoa (Case-insensitive check)
+        int directIdx = text.IndexOf(_targetText, StringComparison.OrdinalIgnoreCase);
+        if (directIdx >= 0)
         {
             var segment = renderInfo.GetBaseline();
             FoundX = segment.GetStartPoint()[iTextSharp.text.pdf.parser.Vector.I1];
             FoundY = segment.GetStartPoint()[iTextSharp.text.pdf.parser.Vector.I2];
+            FoundEndX = segment.GetEndPoint()[iTextSharp.text.pdf.parser.Vector.I1];
+            
+            float h = 10f;
+            try
+            {
+                float ascentY = renderInfo.GetAscentLine().GetStartPoint()[iTextSharp.text.pdf.parser.Vector.I2];
+                float descentY = renderInfo.GetDescentLine().GetStartPoint()[iTextSharp.text.pdf.parser.Vector.I2];
+                h = Math.Abs(ascentY - descentY);
+            }
+            catch {}
+            FoundHeight = h;
+            return;
+        }
+
+        // Route 2: Thu thap chi tiet tung ky tu de ho tro truong hop tu khoa bi split thanh nhieu chunk khoi PDF stream
+        try
+        {
+            var subInfos = renderInfo.GetCharacterRenderInfos();
+            if (subInfos != null && subInfos.Count > 0)
+            {
+                foreach (var charInfo in subInfos)
+                {
+                    string cText = charInfo.GetText();
+                    if (!string.IsNullOrEmpty(cText))
+                    {
+                        var seg = charInfo.GetBaseline();
+                        float h = 10f;
+                        try
+                        {
+                            float ascentY = charInfo.GetAscentLine().GetStartPoint()[iTextSharp.text.pdf.parser.Vector.I2];
+                            float descentY = charInfo.GetDescentLine().GetStartPoint()[iTextSharp.text.pdf.parser.Vector.I2];
+                            h = Math.Abs(ascentY - descentY);
+                        }
+                        catch {}
+
+                        _charList.Add(new CharInfo
+                        {
+                            Text = cText,
+                            X = seg.GetStartPoint()[iTextSharp.text.pdf.parser.Vector.I1],
+                            Y = seg.GetStartPoint()[iTextSharp.text.pdf.parser.Vector.I2],
+                            EndX = seg.GetEndPoint()[iTextSharp.text.pdf.parser.Vector.I1],
+                            Height = h
+                        });
+                    }
+                }
+            }
+            else
+            {
+                var seg = renderInfo.GetBaseline();
+                float x = seg.GetStartPoint()[iTextSharp.text.pdf.parser.Vector.I1];
+                float y = seg.GetStartPoint()[iTextSharp.text.pdf.parser.Vector.I2];
+                float endX = seg.GetEndPoint()[iTextSharp.text.pdf.parser.Vector.I1];
+                float h = 10f;
+                try
+                {
+                    float ascentY = renderInfo.GetAscentLine().GetStartPoint()[iTextSharp.text.pdf.parser.Vector.I2];
+                    float descentY = renderInfo.GetDescentLine().GetStartPoint()[iTextSharp.text.pdf.parser.Vector.I2];
+                    h = Math.Abs(ascentY - descentY);
+                }
+                catch {}
+
+                foreach (char c in text)
+                {
+                    _charList.Add(new CharInfo { Text = c.ToString(), X = x, Y = y, EndX = endX, Height = h });
+                }
+            }
+        }
+        catch
+        {
+            var seg = renderInfo.GetBaseline();
+            float x = seg.GetStartPoint()[iTextSharp.text.pdf.parser.Vector.I1];
+            float y = seg.GetStartPoint()[iTextSharp.text.pdf.parser.Vector.I2];
+            float endX = seg.GetEndPoint()[iTextSharp.text.pdf.parser.Vector.I1];
+            float h = 10f;
+            try
+            {
+                float ascentY = renderInfo.GetAscentLine().GetStartPoint()[iTextSharp.text.pdf.parser.Vector.I2];
+                float descentY = renderInfo.GetDescentLine().GetStartPoint()[iTextSharp.text.pdf.parser.Vector.I2];
+                h = Math.Abs(ascentY - descentY);
+            }
+            catch {}
+
+            foreach (char c in text)
+            {
+                _charList.Add(new CharInfo { Text = c.ToString(), X = x, Y = y, EndX = endX, Height = h });
+            }
+        }
+    }
+
+    public void OnPageEnd()
+    {
+        if (FoundX.HasValue || _charList.Count == 0 || string.IsNullOrEmpty(_targetText)) return;
+
+        // Build toan bo text cua trang
+        StringBuilder sb = new StringBuilder();
+        foreach (var ci in _charList)
+        {
+            sb.Append(ci.Text);
+        }
+        string fullPageText = sb.ToString();
+
+        // 1. Tim truc tiep chuoi (khong phan biet hoa thuong)
+        int idx = fullPageText.IndexOf(_targetText, StringComparison.OrdinalIgnoreCase);
+        if (idx >= 0 && idx < _charList.Count)
+        {
+            FoundX = _charList[idx].X;
+            FoundY = _charList[idx].Y;
+            int endIdx = Math.Min(idx + _targetText.Length - 1, _charList.Count - 1);
+            FoundEndX = _charList[endIdx].EndX;
+            FoundHeight = _charList[idx].Height;
+            return;
+        }
+
+        // 2. Thu lai neu tu khoa va text trang co the bi ngan cach bang khoang trang/dinh dang
+        string targetTrimmed = _targetText.Replace(" ", "").Replace("\t", "");
+        if (!string.IsNullOrEmpty(targetTrimmed))
+        {
+            StringBuilder sbNoSpace = new StringBuilder();
+            List<int> origIndices = new List<int>();
+            for (int i = 0; i < _charList.Count; i++)
+            {
+                if (_charList[i].Text != " " && _charList[i].Text != "\t" && _charList[i].Text != "\r" && _charList[i].Text != "\n")
+                {
+                    sbNoSpace.Append(_charList[i].Text);
+                    origIndices.Add(i);
+                }
+            }
+
+            int idxNoSpace = sbNoSpace.ToString().IndexOf(targetTrimmed, StringComparison.OrdinalIgnoreCase);
+            if (idxNoSpace >= 0 && idxNoSpace < origIndices.Count)
+            {
+                int origIdx = origIndices[idxNoSpace];
+                FoundX = _charList[origIdx].X;
+                FoundY = _charList[origIdx].Y;
+                int endOrigIdx = origIndices[Math.Min(idxNoSpace + targetTrimmed.Length - 1, origIndices.Count - 1)];
+                FoundEndX = _charList[endOrigIdx].EndX;
+                FoundHeight = _charList[origIdx].Height;
+            }
         }
     }
 
     public void BeginTextBlock() {}
     public void EndTextBlock() {}
     public void RenderImage(iTextSharp.text.pdf.parser.ImageRenderInfo renderInfo) {}
-
-    public void SetPage(int page)
-    {
-        FoundPage = page;
-    }
 }
