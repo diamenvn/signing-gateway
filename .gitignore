@@ -3,3 +3,7 @@
 /installer
 /native-singer
 /node-modules
+/node_modules
+/native-signer/bin
+/native-signer/obj
+/tests/
