@@ -1571,6 +1571,9 @@ async function signXmlNative(cfg, xmlString, opts) {
       '--serial', serial,
     ];
 
+    if (opts.tagSigning) args.push('--tag-signing', opts.tagSigning);
+    if (opts.tagReference) args.push('--tag-reference', opts.tagReference);
+
     if (pin) {
       args.push('--pin', pin);
     }
@@ -1994,6 +1997,11 @@ td{padding:7px 4px;border-bottom:1px solid #eee}td:first-child{color:#777;width:
         }
 
         // ---- Nhanh XML ----
+        for (const field of ['tagSigning', 'tagReference']) {
+          if (sig[field] !== undefined && (typeof sig[field] !== 'string' || !sig[field].trim())) {
+            return json(res, 400, { error: `XML_SIGN_OPTIONS: signature.${field} phai la chuoi ten the khong rong` });
+          }
+        }
         let xml = body.document || body.xml;
         if (!xml) return json(res, 400, { error: 'thieu truong document (noi dung XML)' });
         if (body.base64) xml = Buffer.from(xml, 'base64').toString('utf8');
@@ -2024,7 +2032,7 @@ td{padding:7px 4px;border-bottom:1px solid #eee}td:first-child{color:#777;width:
         } catch (e) {
           if (!cfg.useNativeSigner) plugin.invalidateTokenCache();
           audit(cfg, { type: 'sign.fail', docType: 'xml', user: claim.sub, error: e.message });
-          return json(res, /TOKEN/.test(e.message) ? 503 : 500, { error: e.message });
+          return json(res, e.message.includes('XML_SIGN_OPTIONS:') ? 400 : /TOKEN/.test(e.message) ? 503 : 500, { error: e.message });
         }
         const signedXml = Buffer.from(signedB64, 'base64').toString('utf8');
         audit(cfg, { type: 'sign.ok', docType: 'xml', user: claim.sub, sha256: sha });

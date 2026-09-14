@@ -42,6 +42,7 @@ Write-Host ("  Node.js: {0}" -f (node -v)) -ForegroundColor Green
 $iscc = @(
     "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
     "${env:ProgramFiles}\Inno Setup 6\ISCC.exe",
+    "${env:LOCALAPPDATA}\Programs\Inno Setup 6\ISCC.exe",
     "${env:ProgramFiles(x86)}\Inno Setup 5\ISCC.exe"
 ) | Where-Object { Test-Path $_ } | Select-Object -First 1
 
