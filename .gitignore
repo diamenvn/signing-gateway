@@ -6,3 +6,5 @@
 /native-signer/bin
 /native-signer/obj
 /tests/
+/dist/tray/
+/dist/*.exe
