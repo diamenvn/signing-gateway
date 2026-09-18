@@ -17,6 +17,8 @@ $InstDir   = Join-Path $Root 'installer'
 $IssFile   = Join-Path $InstDir 'signing-gateway.iss'
 $GatewayEx = Join-Path $DistDir 'signing-gateway.exe'
 $CfExe     = Join-Path $InstDir 'cloudflared.exe'
+$AppVersion = (Get-Content (Join-Path $Root 'package.json') -Raw | ConvertFrom-Json).version
+if ($AppVersion -notmatch '^\d+\.\d+\.\d+$') { throw 'Version phai co dang major.minor.patch' }
 
 Write-Host ''
 Write-Host '  Signing Gateway - build' -ForegroundColor Cyan
@@ -102,6 +104,10 @@ if ($LASTEXITCODE -ne 0) { throw 'Bien dich C# native-signer that bai' }
 Write-Host '  pdf-signer.exe: OK' -ForegroundColor Green
 
 # --- 4. Dong goi thanh signing-gateway.exe -----------------------------------
+Write-Host '  Dang bien dich ung dung tray cap nhat...' -ForegroundColor Yellow
+& dotnet publish (Join-Path $Root 'tray-updater\SigningGateway.Tray.csproj') -c Release -r win-x64 --self-contained true "-p:Version=$AppVersion" -o (Join-Path $DistDir 'tray')
+if ($LASTEXITCODE -ne 0) { throw 'Bien dich tray updater that bai' }
+
 Write-Host '  Dang dong goi exe...' -ForegroundColor Yellow
 & npx pkg . --targets node22-win-x64 --output "$GatewayEx"
 if ($LASTEXITCODE -ne 0) { throw 'pkg that bai' }
@@ -134,7 +140,7 @@ Write-Host '  Dang tao bo cai...' -ForegroundColor Yellow
 Write-Host ''
 
 # Duong dan TUYET DOI + khong dung /Q, de thay loi that neu ISCC bao loi.
-& $iscc "/O$DistDir" "$IssFile"
+& $iscc "/O$DistDir" "/DAppVersion=$AppVersion" "$IssFile"
 $isccCode = $LASTEXITCODE
 
 if ($isccCode -ne 0) {
@@ -159,3 +165,5 @@ Write-Host ''
 #
 #   signtool sign /fd SHA256 /a /tr http://timestamp.digicert.com /td SHA256 `
 #            dist\SignerGateway.exe
+# Sau khi ky so (neu co), sinh manifest tu DUNG file se upload:
+# powershell -File scripts\write-update-manifest.ps1 -InstallerPath dist\SignerGateway.exe

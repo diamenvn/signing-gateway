@@ -27,6 +27,8 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const { spawn } = require('node:child_process');
 const WebSocket = require('ws');
+const APP_VERSION = require('./package.json').version;
+const { createUpdateLifecycle, prepareUpdate } = require('./update-lifecycle');
 
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0'; // plugin dung self-signed cert
 
@@ -1728,6 +1730,7 @@ async function resolveSerial(cfg, plugin, requestedSerial) {
 }
 
 function makeHandler(cfg, plugin, queue, tunnel, lock, mutex) {
+  const updates = createUpdateLifecycle(cfg);
   return async (req, res) => {
     const p = new URL(req.url, 'http://x').pathname;
     const origin = req.headers.origin;
@@ -1749,7 +1752,16 @@ function makeHandler(cfg, plugin, queue, tunnel, lock, mutex) {
       return res.end();
     }
 
+    let signing = false;
     try {
+      if (req.method === 'POST' && p === '/internal/update/prepare') {
+        const result = await updates.prepare(req);
+        return json(res, result.status, result.body);
+      }
+      if (req.method === 'POST' && ['/v2/sign', '/v2/sign-file'].includes(p)) {
+        if (!updates.enter()) return json(res, 503, { error: 'APP_UPDATING' });
+        signing = true;
+      }
       /* ---- Trang trang thai cho nguoi van hanh may chu ---- */
       if (req.method === 'GET' && p === '/') {
         const s = queue.stats;
@@ -1771,6 +1783,7 @@ td{padding:7px 4px;border-bottom:1px solid #eee}td:first-child{color:#777;width:
 
       /* ---- Health: khong can token, de HIS kiem tra truoc khi hien nut Ky ---- */
       if (req.method === 'GET' && p === '/v2/health') {
+        res.setHeader('Cache-Control', 'no-store');
         let token = 'unknown';
         if (cfg.useNativeSigner) {
           const serial = cfg.certificateSerial;
@@ -1783,6 +1796,7 @@ td{padding:7px 4px;border-bottom:1px solid #eee}td:first-child{color:#777;width:
           } catch (_) { token = 'unknown'; }
         }
         return json(res, 200, {
+          version: APP_VERSION,
           ok: cfg.useNativeSigner ? (token === 'present') : (plugin.connected && token === 'present'),
           plugin: cfg.useNativeSigner ? 'connected' : (plugin.connected ? 'connected' : 'disconnected'),
           token,
@@ -2044,6 +2058,18 @@ td{padding:7px 4px;border-bottom:1px solid #eee}td:first-child{color:#777;width:
     } catch (e) {
       log('error', `${req.method} ${p} -> ${e.message}`);
       return json(res, e.message === 'FILE_QUA_LON' ? 413 : 500, { error: e.message });
+    } finally {
+      if (signing) {
+        // Do not stop the process while a large signed document is still being sent.
+        if (typeof res.once === 'function' && !res.writableFinished && !res.destroyed) {
+          await new Promise(resolve => {
+            const done = () => { res.off('finish', done); res.off('close', done); resolve(); };
+            res.once('finish', done);
+            res.once('close', done);
+          });
+        }
+        updates.leave();
+      }
     }
   };
 }
@@ -2423,6 +2449,10 @@ async function runDiag(pdfPath) {
 
 async function main() {
   const arg = process.argv[2];
+  if (arg === '--prepare-update') {
+    try { await prepareUpdate(loadConfig()); process.exit(0); }
+    catch (e) { console.error(e.message); process.exit(1); }
+  }
   if (arg === '--probe')   return runProbe();
   if (arg === '--license') return runLicense();
   if (arg === '--telegram-test') {
