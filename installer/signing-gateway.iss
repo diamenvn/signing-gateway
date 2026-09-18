@@ -9,7 +9,9 @@
 ; ============================================================================
 
 #define AppName      "Signing Gateway"
-#define AppVersion   "0.2.0"
+#ifndef AppVersion
+  #define AppVersion "0.2.0"
+#endif
 #define AppPublisher "VNPT HIS4"
 #define ExeName      "signing-gateway.exe"
 
@@ -17,6 +19,7 @@
 AppId={{8F3C1A72-4E5D-4B9A-9C21-7D6E0F1B2A34}
 AppName={#AppName}
 AppVersion={#AppVersion}
+VersionInfoDescription=Signing Gateway Setup (AutoUpdate v1)
 AppPublisher={#AppPublisher}
 DefaultDirName={autopf}\SigningGateway
 DefaultGroupName={#AppName}
@@ -32,12 +35,14 @@ PrivilegesRequired=admin
 UninstallDisplayIcon={app}\{#ExeName}
 CloseApplications=no
 RestartApplications=no
+SetupMutex=SigningGatewaySetup
 
 [Languages]
 Name: "en"; MessagesFile: "compiler:Default.isl"
 
 [Files]
 Source: "..\dist\{#ExeName}"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\dist\tray\SigningGateway.Tray.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\README.md";       DestDir: "{app}"; Flags: ignoreversion isreadme
 ; cloudflared.exe la TUY CHON
 Source: "cloudflared.exe";    DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
@@ -56,8 +61,10 @@ Source: "vnpt-ca-plugin-setup.exe"; Flags: dontcopy noencryption skipifsourcedoe
 Name: "{commonappdata}\SigningGateway"; Permissions: users-modify
 
 [Icons]
+Name: "{commonstartup}\Signing Gateway Updates"; Filename: "{app}\SigningGateway.Tray.exe"; WorkingDir: "{app}"
+Name: "{group}\Kiem tra cap nhat"; Filename: "{app}\SigningGateway.Tray.exe"; WorkingDir: "{app}"
 Name: "{group}\Signer Gateway";     Filename: "{app}\{#ExeName}"; WorkingDir: "{commonappdata}\SigningGateway"; IconFilename: "{app}\vnpt.ico"
-Name: "{group}\Trang trang thai";   Filename: "http://127.0.0.1:8080/"
+Name: "{group}\Trang trang thai";   Filename: "http://127.0.0.1:6688/"
 Name: "{group}\Chan doan plugin";   Filename: "{cmd}"; Parameters: "/k ""{app}\{#ExeName}"" --probe"; WorkingDir: "{app}"
 Name: "{group}\Thu muc audit log";  Filename: "{commonappdata}\SigningGateway"
 Name: "{group}\Go cai dat";         Filename: "{uninstallexe}"
@@ -73,7 +80,13 @@ Filename: "{app}\{#ExeName}"; Parameters: "--install"; \
   StatusMsg: "Dang thiet lap va khoi chay Gateway Service ngam..."; \
   Flags: runhidden waituntilterminated
 
+Filename: "{app}\SigningGateway.Tray.exe"; WorkingDir: "{app}"; Flags: nowait runasoriginaluser
+
+[Registry]
+Root: HKLM; Subkey: "Software\VNPT HIS4\SigningGateway"; ValueType: dword; ValueName: "SupportsAutoUpdate"; ValueData: "1"; Flags: uninsdeletevalue uninsdeletekeyifempty
+
 [UninstallRun]
+Filename: "{sys}\taskkill.exe"; Parameters: "/F /IM SigningGateway.Tray.exe"; Flags: runhidden waituntilterminated
 Filename: "{app}\{#ExeName}"; Parameters: "--uninstall"; \
   WorkingDir: "{app}"; \
   Flags: runhidden waituntilterminated
@@ -95,17 +108,60 @@ var
   HasPluginSetup: Boolean;
   SavedTenantId, SavedSecret, SavedOrigin, SavedLicense: String;
   SavedTgToken, SavedTgChatId, SavedTunEnabled, SavedTunToken: String;
+  UpdateMode, GatewayStopped, InstallFinished: Boolean;
 
 function InitializeSetup(): Boolean;
+begin
+  UpdateMode := ExpandConstant('{param:UPDATE|0}') <> '0';
+  Result := True;
+end;
+
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+var
+  ResultCode: Integer;
+  ExistingExe: String;
+begin
+  Result := '';
+  ExistingExe := ExpandConstant('{app}\{#ExeName}');
+  if UpdateMode and (not FileExists(ExistingExe)) then
+  begin
+    Result := 'Khong tim thay Signing Gateway da cai. Hay chay bo cai thu cong.';
+    Exit;
+  end;
+  if UpdateMode and (not FileExists(ExpandConstant('{commonappdata}\SigningGateway\config.json'))) then
+  begin
+    Result := 'Khong tim thay config.json cu. Hay chay bo cai thu cong.';
+    Exit;
+  end;
+  if FileExists(ExistingExe) then
+  begin
+    // Installation is authorized by the elevated setup, not by the HIS secret.
+    // Ask even in /SILENT mode before interrupting the existing gateway.
+    if MsgBox('Cap nhat se dung Signing Gateway de thay phien ban moi.' + #13#10 +
+              'Tac vu ky dang chay (neu co) se bi gian doan. Tiep tuc?',
+              mbConfirmation, MB_YESNO or MB_DEFBUTTON2) <> IDYES then
+    begin
+      Result := 'Da huy cap nhat. Signing Gateway chua bi dung.';
+      Exit;
+    end;
+    // Only stop at the installation commit step, never when the wizard opens.
+    Exec(ExpandConstant('{sys}\schtasks.exe'), '/end /tn "SigningGateway"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /IM signing-gateway.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    GatewayStopped := True;
+  end;
+  Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /IM SigningGateway.Tray.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+end;
+
+procedure DeinitializeSetup();
 var
   ResultCode: Integer;
 begin
-  Result := True;
-  // Cuong buc dong moi instance signing-gateway.exe dang chay trong he thong
-  Exec(ExpandConstant('{cmd}'), '/c taskkill /F /IM signing-gateway.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-  // Truoc khi cai dat, dung va xoa task cu de tranh loi file lock hoac khoi chay lai bat thuong
-  Exec(ExpandConstant('{cmd}'), '/c schtasks /end /tn "SigningGateway"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-  Exec(ExpandConstant('{cmd}'), '/c schtasks /delete /tn "SigningGateway" /f', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  if GatewayStopped and (not InstallFinished) then
+  begin
+    // Best effort recovery when setup fails after stopping the previous process.
+    Exec(ExpandConstant('{sys}\schtasks.exe'), '/run /tn "SigningGateway"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    ExecAsOriginalUser(ExpandConstant('{app}\SigningGateway.Tray.exe'), '', ExpandConstant('{app}'), SW_HIDE, ewNoWait, ResultCode);
+  end;
 end;
 
 // "https://his4-dev.vnpthis.vn/" -> "his4-dev.vnpthis.vn"
@@ -185,7 +241,7 @@ end;
 
 function ShouldInstallPlugin(): Boolean;
 begin
-  Result := HasPluginSetup and (not CheckVnptPlugin());
+  Result := (not UpdateMode) and HasPluginSetup and (not CheckVnptPlugin());
 end;
 
 function GetJsonValueRaw(const FilePath, Key: String): String;
@@ -272,7 +328,7 @@ begin
 
   // Chi canh bao khi plugin CHUA cai VA bo cai KHONG kem file cai plugin.
   // Neu bo cai co kem plugin thi no se duoc cai o buoc [Run] -> khong canh bao.
-  if (not CheckVnptPlugin()) and (not HasPluginSetup) then
+  if (not UpdateMode) and (not CheckVnptPlugin()) and (not HasPluginSetup) then
   begin
     Msg :=
       'Khong tim thay VNPT-CA Plugin tren may nay.' + #13#10#13#10 +
@@ -363,6 +419,11 @@ end;
 
 function ShouldSkipPage(PageID: Integer): Boolean;
 begin
+  if UpdateMode then
+  begin
+    Result := True;
+    Exit;
+  end;
   Result := False;
   // License da nhung san khi build -> khong hoi nua
   if PageID = LicPage.ID then
@@ -428,6 +489,8 @@ var
 begin
   DataDir := ExpandConstant('{commonappdata}\SigningGateway');
   CfgFile := DataDir + '\config.json';
+  // Automatic upgrades preserve every existing setting, including PIN and serial.
+  if UpdateMode then Exit;
 
   // Config da ton tai (cai lai / nang cap).
   // KHONG am tham bo qua: nguoi dung vua go het thong tin trong wizard,
@@ -471,7 +534,7 @@ begin
   SetArrayLength(Lines, 33);
   Lines[0]  := '{';
   Lines[1]  := '  "host": "127.0.0.1",';
-  Lines[2]  := '  "port": 8080,';
+  Lines[2]  := '  "port": 6688,';
   Lines[3]  := '  "allowedOrigins": ["' + Trim(CfgPage.Values[2]) + '"],';
   Lines[4]  := '  "hisSharedSecret": "' + Trim(CfgPage.Values[1]) + '",';
   Lines[5]  := '  "tenantId": "' + Trim(CfgPage.Values[0]) + '",';
@@ -514,6 +577,7 @@ begin
   begin
     WriteConfig();
   end;
+  if CurStep = ssDone then InstallFinished := True;
 end;
 
 function UpdateReadyMemo(Space, NewLine, MemoUserInfo, MemoDirInfo, MemoTypeInfo,

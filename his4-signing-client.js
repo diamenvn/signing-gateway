@@ -167,6 +167,7 @@ export async function signXml(xmlString, opts = {}) {
         digestMethod: opts.digestMethod ?? 'SHA256',
         certificateSerial: opts.certificateSerial ?? undefined,
         tagSigning: opts.tagSigning ?? undefined,
+        tagReference: opts.tagReference ?? undefined,
       },
     }),
   });
