@@ -1,7 +1,7 @@
 {
     "appId":  "signing-gateway",
-    "version":  "0.3.0",
-    "downloadUrl":  "https://github.com/diamenvn/signing-gateway/releases/download/v0.3.0/SignerGateway.exe",
+    "version":  "0.3.1",
+    "downloadUrl":  "https://github.com/diamenvn/signing-gateway/releases/download/v0.3.1/SignerGateway.exe",
     "sha256":  "e541e59ef2f97c5a31e5f44d858d03af1536c9bf62fe5bff0c97d28edee32665",
     "releaseNotes":  "Kiểm thử cập nhật qua GitHub Releases."
 }
