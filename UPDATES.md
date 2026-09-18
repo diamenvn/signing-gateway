@@ -18,11 +18,13 @@
 
 Tray đọc manifest tại:
 
-`https://raw.githubusercontent.com/diamenvn/signing-gateway/HMIS-20756/releases/latest.json`
+`https://github.com/diamenvn/signing-gateway/HMIS-20756/releases/latest.json`
 
 Link tải mặc định trỏ trực tiếp đến bộ cài mới do build.ps1 tạo ra:
 
-`https://raw.githubusercontent.com/diamenvn/signing-gateway/HMIS-20756/dist/SignerGateway.exe`
+`https://github.com/diamenvn/signing-gateway/releases/download/@version/SignerGateway.exe`
+
+<version>: thay bằng tên phiên bản cụ thể: v1.0.1
 
 Phát hành trực tiếp `dist/SignerGateway.exe`; không cần sao chép hoặc đổi tên sang file VNPT-CA Plugin. Version lấy từ metadata bộ cài, phải khớp manifest. `dist/signing-gateway.exe` là chương trình gateway, không phải bộ cài để phân phối qua updater.
 
@@ -45,8 +47,8 @@ powershell -ExecutionPolicy Bypass -File scripts\write-update-manifest.ps1 `
 
 5. Upload/commit `dist/SignerGateway.exe` lên nhánh HMIS-20756 trước, sau đó xuất bản `releases/latest.json` trên cùng nhánh. Chưa publish manifest thì máy khách chưa biết release mới. Có thể dùng GitHub Releases với URL asset riêng cho mỗi version; truyền `-DownloadUrl` vào script.
 6. Cài thủ công một lần bản có tray/updater trên máy đang dùng bản cũ. Những lần sau mới tự phát hiện và nâng cấp được. Giữ nguyên AppId Inno Setup.
-
-Không tự đổi version/release hoặc upload lên GitHub trong quá trình sửa code.
+7. window + R và nhập `shell:common startup` để mở thư mục start-up. Kiểm tra có shortcut Signing Gateway Updates, trỏ tới: `C:\Program Files (x86)\SigningGateway\SigningGateway.Tray.exe`, nếu không thì tạo shortcut.
+8. Không tự đổi version/release hoặc upload lên GitHub trong quá trình sửa code.
 
 ## Kiểm thử không cài app
 
