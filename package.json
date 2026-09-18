@@ -1,6 +1,6 @@
 {
   "name": "signing-gateway",
-  "version": "0.3.3",
+  "version": "1.0.2",
   "description": "Signing gateway: HIS4 -> VNPT-CA Plugin -> USB Token",
   "main": "server.js",
   "bin": "server.js",
