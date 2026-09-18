@@ -119,7 +119,6 @@ end;
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 var
   ResultCode: Integer;
-  SupportsUpdate: Cardinal;
   ExistingExe: String;
 begin
   Result := '';
@@ -136,17 +135,13 @@ begin
   end;
   if FileExists(ExistingExe) then
   begin
-    if RegQueryDWordValue(HKLM, 'Software\VNPT HIS4\SigningGateway', 'SupportsAutoUpdate', SupportsUpdate) and (SupportsUpdate = 1) then
+    // Installation is authorized by the elevated setup, not by the HIS secret.
+    // Ask even in /SILENT mode before interrupting the existing gateway.
+    if MsgBox('Cap nhat se dung Signing Gateway de thay phien ban moi.' + #13#10 +
+              'Tac vu ky dang chay (neu co) se bi gian doan. Tiep tuc?',
+              mbConfirmation, MB_YESNO or MB_DEFBUTTON2) <> IDYES then
     begin
-      if (not Exec(ExistingExe, '--prepare-update', ExpandConstant('{commonappdata}\SigningGateway'), SW_HIDE, ewWaitUntilTerminated, ResultCode)) or (ResultCode <> 0) then
-      begin
-        Result := 'Gateway dang ky hoac chua san sang cap nhat. Vui long thu lai sau.';
-        Exit;
-      end;
-    end
-    else if UpdateMode then
-    begin
-      Result := 'Phien ban cu chua ho tro tu cap nhat. Can cai thu cong mot lan.';
+      Result := 'Da huy cap nhat. Signing Gateway chua bi dung.';
       Exit;
     end;
     // Only stop at the installation commit step, never when the wizard opens.
