@@ -64,7 +64,7 @@ Name: "{commonappdata}\SigningGateway"; Permissions: users-modify
 Name: "{commonstartup}\Signing Gateway Updates"; Filename: "{app}\SigningGateway.Tray.exe"; WorkingDir: "{app}"
 Name: "{group}\Kiem tra cap nhat"; Filename: "{app}\SigningGateway.Tray.exe"; WorkingDir: "{app}"
 Name: "{group}\Signer Gateway";     Filename: "{app}\{#ExeName}"; WorkingDir: "{commonappdata}\SigningGateway"; IconFilename: "{app}\vnpt.ico"
-Name: "{group}\Trang trang thai";   Filename: "http://127.0.0.1:8080/"
+Name: "{group}\Trang trang thai";   Filename: "http://127.0.0.1:6688/"
 Name: "{group}\Chan doan plugin";   Filename: "{cmd}"; Parameters: "/k ""{app}\{#ExeName}"" --probe"; WorkingDir: "{app}"
 Name: "{group}\Thu muc audit log";  Filename: "{commonappdata}\SigningGateway"
 Name: "{group}\Go cai dat";         Filename: "{uninstallexe}"
@@ -534,7 +534,7 @@ begin
   SetArrayLength(Lines, 33);
   Lines[0]  := '{';
   Lines[1]  := '  "host": "127.0.0.1",';
-  Lines[2]  := '  "port": 8080,';
+  Lines[2]  := '  "port": 6688,';
   Lines[3]  := '  "allowedOrigins": ["' + Trim(CfgPage.Values[2]) + '"],';
   Lines[4]  := '  "hisSharedSecret": "' + Trim(CfgPage.Values[1]) + '",';
   Lines[5]  := '  "tenantId": "' + Trim(CfgPage.Values[0]) + '",';

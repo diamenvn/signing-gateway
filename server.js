@@ -5,7 +5,7 @@
  *        |  HTTPS
  *   Cloudflare Tunnel
  *        |  HTTP localhost
- *   Gateway (file nay)          <- 127.0.0.1:8080
+ *   Gateway (file nay)          <- 127.0.0.1:6688
  *        |  WSS localhost
  *   VNPT-CA Plugin
  *        |
@@ -100,7 +100,7 @@ const CONFIG_PATH = path.join(BASE_DIR, 'config.json');
 
 const DEFAULTS = {
   host: '127.0.0.1',
-  port: 8080,
+  port: 6688,
 
   // Origin duoc phep goi. Them domain production khi trien khai that.
   allowedOrigins: ['https://his4-dev.vnpthis.vn'],
