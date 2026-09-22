@@ -28,14 +28,14 @@ public sealed class UpdateClient
             throw new InvalidDataException("downloadUrl trong releases/latest.json không phải URL hợp lệ.");
         if (uri.Scheme != "https" || !uri.IsDefaultPort || uri.UserInfo != "" || uri.Fragment != "")
             throw new InvalidDataException("Đường dẫn tải không hợp lệ.");
-        if (uri.Host == "github.com" && uri.AbsolutePath.StartsWith("/diamenvn/signing-gateway/releases/tag/", StringComparison.Ordinal))
-            throw new InvalidDataException("downloadUrl trong releases/latest.json đang dùng link trang release (/releases/tag/). Hãy dùng link tải bộ cài: https://github.com/diamenvn/signing-gateway/releases/download/<tag>/SignerGateway.exe");
+        if (uri.Host == "github.com" && uri.AbsolutePath.StartsWith("/trongdqtgg/signing-gateway/releases/tag/", StringComparison.Ordinal))
+            throw new InvalidDataException("downloadUrl trong releases/latest.json đang dùng link trang release (/releases/tag/). Hãy dùng link tải bộ cài: https://github.com/trongdqtgg/signing-gateway/releases/download/<tag>/SignerGateway.exe");
         if (uri.Host == "github.com" && uri.AbsolutePath.StartsWith("/diamenvn/signing-gateway/blob/", StringComparison.Ordinal))
             uri = new Uri("https://raw.githubusercontent.com" + uri.AbsolutePath.Replace("/blob/", "/"));
         bool allowed = (uri.Host == "raw.githubusercontent.com" && uri.AbsolutePath.StartsWith("/diamenvn/signing-gateway/", StringComparison.Ordinal)) ||
-            (uri.Host == "github.com" && uri.AbsolutePath.StartsWith("/diamenvn/signing-gateway/releases/download/", StringComparison.Ordinal));
+            (uri.Host == "github.com" && uri.AbsolutePath.StartsWith("/trongdqtgg/signing-gateway/releases/download/", StringComparison.Ordinal));
         if (!allowed || !uri.AbsolutePath.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
-            throw new InvalidDataException("Bộ cài phải thuộc repository diamenvn/signing-gateway.");
+            throw new InvalidDataException("Bộ cài phải dùng GitHub Releases của trongdqtgg/signing-gateway hoặc nguồn raw diamenvn/signing-gateway.");
         return uri;
     }
 

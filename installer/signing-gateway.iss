@@ -347,7 +347,7 @@ begin
     'Nhap thong tin ket noi voi he thong HIS4',
     'Cac thong tin nay do doi ngu HIS4 cung cap.');
   CfgPage.Add('Ma benh vien (tenantId), vi du: bv-bach-mai:', False);
-  CfgPage.Add('Secret dung chung voi backend HIS4 (64 ky tu hex):', False);
+  CfgPage.Add('Secret dung chung voi backend HIS4 (SecretKey, toi thieu 32 ky tu):', False);
   CfgPage.Add('Origin cua HIS4:', False);
 
   CfgPage.Values[0] := SavedTenantId;
@@ -442,11 +442,10 @@ begin
   if CurPageID = CfgPage.ID then
   begin
     S := Trim(CfgPage.Values[1]);
-    if (S <> '') and (Length(S) <> 64) then
+    if (S <> '') and (Length(S) < 32) then
     begin
-      MsgBox('Secret phai dai dung 64 ky tu hex.' + #13#10#13#10 +
-             'Sinh bang lenh:' + #13#10 +
-             'node -e "console.log(require(''crypto'').randomBytes(32).toString(''hex''))"',
+      MsgBox('SecretKey phai co it nhat 32 ky tu va trung voi SecretKey cua backend HIS4.' + #13#10 +
+             'Khong bat buoc la chuoi hex.',
              mbError, MB_OK);
       Result := False;
       Exit;

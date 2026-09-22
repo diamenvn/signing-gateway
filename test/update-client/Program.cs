@@ -10,8 +10,10 @@ void Reject(Action action) { bool rejected = false; try { action(); } catch { re
 var baseline = new Release("signing-gateway", "0.3.0", "https://github.com/diamenvn/signing-gateway/blob/HMIS-20756/dist/setup.exe", new string('a', 64), "Test");
 Check(UpdateClient.ParseVersion("0.10.0") > UpdateClient.ParseVersion("0.9.0"));
 Check(UpdateClient.DownloadUri(baseline.DownloadUrl).AbsoluteUri == "https://raw.githubusercontent.com/diamenvn/signing-gateway/HMIS-20756/dist/setup.exe");
-const string assetUrl = "https://github.com/diamenvn/signing-gateway/releases/download/v0.3.0/SignerGateway.exe";
+const string assetUrl = "https://github.com/trongdqtgg/signing-gateway/releases/download/v0.3.0/SignerGateway.exe";
 Check(UpdateClient.DownloadUri(assetUrl).AbsoluteUri == assetUrl);
+Check(UpdateClient.DownloadUri("https://github.com/trongdqtgg/signing-gateway/releases/download/v1.0.2/SignerGateway.exe").Host == "github.com");
+Reject(() => UpdateClient.DownloadUri("https://github.com/trongdqtgg/signing-gateway-other/releases/download/v1.0.2/SignerGateway.exe"));
 try
 {
     UpdateClient.DownloadUri(assetUrl.Replace("/download/", "/tag/"));
@@ -22,7 +24,7 @@ Reject(() => UpdateClient.DownloadUri("not a URL"));
 Reject(() => UpdateClient.Validate(baseline with { AppId = "plugin" }));
 Reject(() => UpdateClient.Validate(baseline with { Version = "0.3.0-beta" }));
 Reject(() => UpdateClient.Validate(baseline with { Sha256 = "bad" }));
-foreach (string url in new[] { "http://github.com/diamenvn/signing-gateway/releases/download/0.3/setup.exe", "https://evil.example/setup.exe", "https://github.com/other/repo/releases/download/0.3/setup.exe", "https://raw.githubusercontent.com/diamenvn/signing-gateway/main/file.html" })
+foreach (string url in new[] { "http://github.com/trongdqtgg/signing-gateway/releases/download/0.3/setup.exe", "https://evil.example/setup.exe", "https://github.com/other/repo/releases/download/0.3/setup.exe", "https://raw.githubusercontent.com/diamenvn/signing-gateway/main/file.html" })
     Reject(() => UpdateClient.DownloadUri(url));
 var handler = new FakeHandler();
 using var http = new HttpClient(handler);

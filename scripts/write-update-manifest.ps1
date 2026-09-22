@@ -10,19 +10,19 @@ if ([string]::IsNullOrWhiteSpace($OutputPath)) {
 }
 $metadata = Get-Content (Join-Path $PSScriptRoot '..\package.json') -Raw | ConvertFrom-Json
 if ([string]::IsNullOrWhiteSpace($DownloadUrl)) {
-    $DownloadUrl = "https://github.com/diamenvn/signing-gateway/releases/download/v$($metadata.version)/SignerGateway.exe"
+    $DownloadUrl = "https://github.com/trongdqtgg/signing-gateway/releases/download/v$($metadata.version)/SignerGateway.exe"
 }
 $downloadUri = $null
 if (-not [Uri]::TryCreate($DownloadUrl, [UriKind]::Absolute, [ref]$downloadUri)) {
     throw 'DownloadUrl khong phai URL hop le.'
 }
-if ($downloadUri.AbsolutePath.StartsWith('/diamenvn/signing-gateway/releases/tag/')) {
+if ($downloadUri.AbsolutePath.StartsWith('/trongdqtgg/signing-gateway/releases/tag/')) {
     throw 'Sai link trang release: thay /releases/tag/ bang /releases/download/ va chon dung ten file EXE trong Assets.'
 }
-$allowed = ($downloadUri.Host -eq 'github.com' -and $downloadUri.AbsolutePath.StartsWith('/diamenvn/signing-gateway/releases/download/', [StringComparison]::Ordinal)) -or
+$allowed = ($downloadUri.Host -eq 'github.com' -and $downloadUri.AbsolutePath.StartsWith('/trongdqtgg/signing-gateway/releases/download/', [StringComparison]::Ordinal)) -or
     ($downloadUri.Host -eq 'raw.githubusercontent.com' -and $downloadUri.AbsolutePath.StartsWith('/diamenvn/signing-gateway/', [StringComparison]::Ordinal))
 if (-not $allowed -or $downloadUri.Scheme -ne 'https' -or -not $downloadUri.IsDefaultPort -or $downloadUri.UserInfo -ne '' -or $downloadUri.Fragment -ne '' -or -not $downloadUri.AbsolutePath.EndsWith('.exe', [StringComparison]::OrdinalIgnoreCase)) {
-    throw 'DownloadUrl phai la link HTTPS tai truc tiep file EXE thuoc repository diamenvn/signing-gateway.'
+    throw 'DownloadUrl phai la link EXE HTTPS tu Releases trongdqtgg/signing-gateway hoac raw diamenvn/signing-gateway.'
 }
 $installer = Get-Item -LiteralPath $InstallerPath
 $info = $installer.VersionInfo

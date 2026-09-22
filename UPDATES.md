@@ -1,6 +1,6 @@
 # Cập nhật Signing Gateway từ tray Windows
 
-> Nguồn phát hành hiện tại: upload `SignerGateway.exe` vào Assets của GitHub Release (bộ cài vượt giới hạn Git 100 MiB). Script sinh manifest mặc định dùng `https://github.com/diamenvn/signing-gateway/releases/download/v<version>/SignerGateway.exe`. Không dùng `/releases/tag/`: đó là trang release, không phải link tải. Upload asset trước rồi push `releases/latest.json` lên nhánh `HMIS-20756`. Các hướng dẫn lưu EXE trực tiếp trong `dist` trên Git dưới đây chỉ áp dụng nếu file nằm trong giới hạn GitHub.
+> Nguồn phát hành hiện tại: upload `SignerGateway.exe` vào Assets của GitHub Release (bộ cài vượt giới hạn Git 100 MiB). Script sinh manifest mặc định dùng `https://github.com/trongdqtgg/signing-gateway/releases/download/v<version>/SignerGateway.exe`. Không dùng `/releases/tag/`: đó là trang release, không phải link tải. Upload asset trước rồi push `releases/latest.json` lên nhánh `HMIS-20756`. Các hướng dẫn lưu EXE trực tiếp trong `dist` trên Git dưới đây chỉ áp dụng nếu file nằm trong giới hạn GitHub.
 
 Ứng dụng `SigningGateway.Tray.exe` chạy trong phiên người dùng, tự mở cùng Windows qua shortcut Startup. Gateway tiếp tục chạy nền theo task hiện có.
 
@@ -18,11 +18,13 @@
 
 Tray đọc manifest tại:
 
-`https://github.com/diamenvn/signing-gateway/HMIS-20756/releases/latest.json`
+`https://raw.githubusercontent.com/diamenvn/signing-gateway/HMIS-20756/releases/latest.json`
+
+Manifest vẫn ở repository diamenvn; bộ cài được upload vào Releases của trongdqtgg/signing-gateway. Tray cũ chỉ cho phép nguồn tải diamenvn nên cần cài thủ công bản tray hỗ trợ nguồn mới trước khi chuyển nguồn tải. Khi build lại bộ cài, sinh lại SHA-256 từ đúng EXE sẽ upload.
 
 Link tải mặc định trỏ trực tiếp đến bộ cài mới do build.ps1 tạo ra:
 
-`https://github.com/diamenvn/signing-gateway/releases/download/@version/SignerGateway.exe`
+`https://github.com/trongdqtgg/signing-gateway/releases/download/@version/SignerGateway.exe`
 
 <version>: thay bằng tên phiên bản cụ thể: v1.0.1
 

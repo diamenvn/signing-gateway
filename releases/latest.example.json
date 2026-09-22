@@ -1,7 +1,7 @@
 {
   "appId": "signing-gateway",
   "version": "0.3.0",
-  "downloadUrl": "https://github.com/diamenvn/signing-gateway/releases/download/v0.3.0/SignerGateway.exe",
+  "downloadUrl": "https://github.com/trongdqtgg/signing-gateway/releases/download/v0.3.0/SignerGateway.exe",
   "sha256": "REPLACE_USING_scripts/write-update-manifest.ps1",
   "releaseNotes": "Bổ sung thông báo và cập nhật Signing Gateway từ tray Windows."
 }
