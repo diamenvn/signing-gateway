@@ -2,6 +2,6 @@
     "appId":  "signing-gateway",
     "version":  "1.0.4",
     "downloadUrl":  "https://github.com/trongdqtgg/signing-gateway/releases/download/v1.0.4/SignerGateway.exe",
-    "sha256":  "ad2dfd96a07589d366faf45bef8f0bd80a2e57149cbcc063e7c9e38fac2073c8",
-    "releaseNotes":  "Phát hành version v1.0.4 trên: https://github.com/trongdqtgg"
+    "sha256":  "1df507cc3f5f3689ceafd5f05bccdebaec8268760fa2152c8d51d4f07cf929b6",
+    "releaseNotes":  "Update điều chỉnh SecretKey."
 }
