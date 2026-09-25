@@ -3,6 +3,7 @@ using System.IO;
 using System.Security;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
+using iTextSharp.text;
 using iTextSharp.text.pdf;
 using iTextSharp.text.pdf.security;
 using System.Text;
@@ -16,6 +17,8 @@ class Program
 {
     static int Main(string[] args)
     {
+        System.Text.Encoding.RegisterProvider(System.Text.CodePagesEncodingProvider.Instance);
+        Console.OutputEncoding = Encoding.UTF8;
         string input = null;
         string output = null;
         string serial = null;
@@ -27,15 +30,44 @@ class Program
         float ury = 0;
         string desc = null;
         string image = null;
+        string colorStr = null;
+        float tsize = 8.5f;
 
+        string signmark = null;
+        float smWidth = 150f;
+        float smHeight = 75f;
+        float smOffsetX = 0f;
+        float smOffsetY = -45f;
+        bool hasOffsetX = false;
+        bool hasOffsetY = false;
+
+        string pinFormat = null;
+        bool forceCng = false;
         bool listOnly = false;
         bool testPkcs11 = false;
         bool xmlMode = false;
+        string tagSigning = null;
+        string tagReference = null;
+        bool smCenter = true;
         for (int i = 0; i < args.Length; i++)
         {
             if (args[i] == "--list") listOnly = true;
             else if (args[i] == "--test-pkcs11") testPkcs11 = true;
             else if (args[i] == "--xml") xmlMode = true;
+            else if (args[i] == "--tag-signing" && i + 1 < args.Length) tagSigning = args[++i];
+            else if (args[i] == "--tag-reference" && i + 1 < args.Length) tagReference = args[++i];
+            else if (args[i] == "--force-cng") forceCng = true;
+            else if (args[i] == "--smcenter")
+            {
+                if (i + 1 < args.Length && (args[i + 1].ToLower() == "true" || args[i + 1].ToLower() == "false"))
+                {
+                    bool.TryParse(args[++i], out smCenter);
+                }
+                else
+                {
+                    smCenter = true;
+                }
+            }
             else if (args[i] == "--input" && i + 1 < args.Length) input = args[++i];
             else if (args[i] == "--output" && i + 1 < args.Length) output = args[++i];
             else if (args[i] == "--serial" && i + 1 < args.Length) serial = args[++i];
@@ -47,55 +79,182 @@ class Program
             else if (args[i] == "--ury" && i + 1 < args.Length) float.TryParse(args[++i], out ury);
             else if (args[i] == "--desc" && i + 1 < args.Length) desc = args[++i];
             else if (args[i] == "--image" && i + 1 < args.Length) image = args[++i];
+            else if (args[i] == "--color" && i + 1 < args.Length) colorStr = args[++i];
+            else if (args[i] == "--tsize" && i + 1 < args.Length) float.TryParse(args[++i], out tsize);
+            else if (args[i] == "--signmark" && i + 1 < args.Length) signmark = args[++i];
+            else if (args[i] == "--smwidth" && i + 1 < args.Length) float.TryParse(args[++i], out smWidth);
+            else if (args[i] == "--smheight" && i + 1 < args.Length) float.TryParse(args[++i], out smHeight);
+            else if (args[i] == "--smoffsetx" && i + 1 < args.Length) { float.TryParse(args[++i], out smOffsetX); hasOffsetX = true; }
+            else if (args[i] == "--smoffsety" && i + 1 < args.Length) { float.TryParse(args[++i], out smOffsetY); hasOffsetY = true; }
+            else if (args[i] == "--pin-format" && i + 1 < args.Length) pinFormat = args[++i];
+        }
+
+        if (smCenter)
+        {
+            if (!hasOffsetX) smOffsetX = 0f;
+            if (!hasOffsetY) smOffsetY = 0f;
         }
 
         if (listOnly)
         {
             try
             {
-                X509Store store = new X509Store(StoreName.My, StoreLocation.CurrentUser);
-                store.Open(OpenFlags.ReadOnly);
+                var printedSerials = new HashSet<string>();
+
+                // 1. Quét chứng chỉ từ Windows Certificate Store (CurrentUser/My)
                 try
                 {
-                    foreach (var cert in store.Certificates)
+                    X509Store store = new X509Store(StoreName.My, StoreLocation.CurrentUser);
+                    store.Open(OpenFlags.ReadOnly);
+                    try
                     {
-                        string serialNumber = cert.SerialNumber.Replace(" ", "").Replace(":", "").ToUpper();
-                        string cn = GetCertCN(cert);
-                        Console.WriteLine($"SERIAL:{serialNumber}|CN:{cn}|HAS_KEY:{cert.HasPrivateKey}");
+                        foreach (var cert in store.Certificates)
+                        {
+                            if (!cert.HasPrivateKey) continue;
+                            string cn = GetCertCN(cert);
+                            
+                            try
+                            {
+                                using (var rsa = cert.GetRSAPrivateKey())
+                                {
+                                    if (rsa == null) continue;
+                                    
+                                    bool isHw = IsHardwareKey(rsa);
+                                    if (rsa is RSACng rsaCng)
+                                    {
+                                        string provName = rsaCng.Key.Provider.Provider;
+                                        Console.WriteLine($"[DEBUG_HW_CNG] Cert: {cn}, Provider: {provName}, IsHwKey: {isHw}");
+                                    }
+                                    else if (rsa is RSACryptoServiceProvider rsaCsp)
+                                    {
+                                        string provName = rsaCsp.CspKeyContainerInfo.ProviderName;
+                                        Console.WriteLine($"[DEBUG_HW_CSP] Cert: {cn}, Provider: {provName}, IsHwKey: {isHw}");
+                                    }
+
+                                    if (!isHw) continue;
+                                    
+                                    if (rsa is RSACng rsaCngKey)
+                                    {
+                                        try
+                                        {
+                                            string keyName = rsaCngKey.Key.KeyName;
+                                            CngProvider provider = rsaCngKey.Key.Provider;
+                                            using (CngKey silentKey = CngKey.Open(keyName, provider, CngKeyOpenOptions.Silent))
+                                            {
+                                            }
+                                        }
+                                        catch (CryptographicException ex)
+                                        {
+                                            string msg = ex.Message.ToLower();
+                                            int hr = ex.HResult;
+                                            Console.WriteLine($"[DEBUG_LIST] Cert: {cn}, Msg: {ex.Message}, HR: {hr} (0x{hr:X})");
+                                            
+                                            bool isUnplugged = 
+                                                msg.Contains("removed") || 
+                                                msg.Contains("not in the reader") || 
+                                                msg.Contains("no smart card") || 
+                                                msg.Contains("reader unavailable") || 
+                                                msg.Contains("no reader") || 
+                                                msg.Contains("device not connected") ||
+                                                hr == -2146435031 || 
+                                                hr == -2146435113 || 
+                                                hr == -2146435036 || 
+                                                hr == -2146435060 || 
+                                                hr == -2146435063;
+                                                
+                                            if (isUnplugged) continue;
+                                        }
+                                    }
+                                    else if (rsa is RSACryptoServiceProvider rsaCspKey)
+                                    {
+                                        var info = rsaCspKey.CspKeyContainerInfo;
+                                        if (info.HardwareDevice)
+                                        {
+                                            try
+                                            {
+                                                CspParameters silentParams = new CspParameters
+                                                {
+                                                    ProviderName = info.ProviderName,
+                                                    ProviderType = info.ProviderType,
+                                                    KeyContainerName = info.KeyContainerName,
+                                                    Flags = CspProviderFlags.UseExistingKey | CspProviderFlags.NoPrompt
+                                                };
+                                                using (var testCsp = new RSACryptoServiceProvider(silentParams))
+                                                {
+                                                }
+                                            }
+                                            catch (CryptographicException ex)
+                                            {
+                                                string msg = ex.Message.ToLower();
+                                                int hr = ex.HResult;
+                                                Console.WriteLine($"[DEBUG_LIST_CSP] Cert: {cn}, Msg: {ex.Message}, HR: {hr} (0x{hr:X})");
+                                                
+                                                bool isUnplugged = 
+                                                    msg.Contains("removed") || 
+                                                    msg.Contains("not in the reader") || 
+                                                    msg.Contains("no smart card") || 
+                                                    msg.Contains("reader unavailable") || 
+                                                    msg.Contains("no reader") || 
+                                                    msg.Contains("device not connected") ||
+                                                    hr == -2146435031 || 
+                                                    hr == -2146435113 || 
+                                                    hr == -2146435036 || 
+                                                    hr == -2146435060 || 
+                                                    hr == -2146435063;
+                                                    
+                                                if (isUnplugged) continue;
+                                            }
+                                        }
+                                    }
+                                }
+                                
+                                string serialNumber = cert.SerialNumber.Replace(" ", "").Replace(":", "").ToUpper();
+                                if (!printedSerials.Contains(serialNumber))
+                                {
+                                    Console.WriteLine($"SERIAL:{serialNumber}|CN:{cn}|HAS_KEY:true");
+                                    printedSerials.Add(serialNumber);
+                                }
+                            }
+                            catch {}
+                        }
+                    }
+                    finally
+                    {
+                        store.Close();
                     }
                 }
-                finally
+                catch (Exception exStore)
                 {
-                    store.Close();
+                    Console.WriteLine($"[DEBUG] Loi quet Windows Store: {exStore.Message}");
                 }
 
-                // Quet tat ca cac file PKCS#11 DLL trong thu muc he thong
-                Console.WriteLine("=== DANH SACH THU VIEN PKCS#11 ===");
-                string[] searchDirs = { 
-                    Environment.GetFolderPath(Environment.SpecialFolder.System),
-                    Environment.GetFolderPath(Environment.SpecialFolder.SystemX86)
-                };
-                foreach (var dir in searchDirs)
+                // 2. Quét dự phòng trực tiếp qua các PKCS#11 DLLs cài trên máy
+                try
                 {
-                    if (Directory.Exists(dir))
+                    var dllPaths = FindAllPkcs11Dlls();
+                    foreach (var dllPath in dllPaths)
                     {
                         try
                         {
-                            var files = Directory.GetFiles(dir, "*csp11*.dll");
-                            foreach (var f in files)
+                            var pkcsCerts = ListCertificatesFromPkcs11(dllPath, pin);
+                            foreach (var pair in pkcsCerts)
                             {
-                                Console.WriteLine($"PKCS11_DLL:{Path.GetFileName(f)}|PATH:{f}");
-                                DumpDllExports(f);
-                            }
-                            var pkcsFiles = Directory.GetFiles(dir, "*pkcs11*.dll");
-                            foreach (var f in pkcsFiles)
-                            {
-                                Console.WriteLine($"PKCS11_DLL:{Path.GetFileName(f)}|PATH:{f}");
-                                DumpDllExports(f);
+                                string serialNumber = pair.Item1.ToUpper();
+                                string cn = pair.Item2;
+                                if (!printedSerials.Contains(serialNumber))
+                                {
+                                    Console.WriteLine($"[DEBUG_HW_PKCS11] Cert: {cn}, Provider: PKCS11 ({Path.GetFileName(dllPath)}), IsHwKey: True");
+                                    Console.WriteLine($"SERIAL:{serialNumber}|CN:{cn}|HAS_KEY:true");
+                                    printedSerials.Add(serialNumber);
+                                }
                             }
                         }
                         catch {}
                     }
+                }
+                catch (Exception exPkcs)
+                {
+                    Console.WriteLine($"[DEBUG] Loi quet PKCS11: {exPkcs.Message}");
                 }
             }
             catch (Exception ex)
@@ -193,29 +352,55 @@ class Program
         {
             if (string.IsNullOrEmpty(input) || string.IsNullOrEmpty(output) || string.IsNullOrEmpty(serial))
             {
-                Console.Error.WriteLine("Loi: Thieu tham so bat buoc cho XML (--input, --output, --serial)");
+                Console.Error.WriteLine("Loi: Thieu tham so bat buoc (--input, --output, --serial) cho XML");
                 return 1;
             }
 
             try
             {
-                Console.WriteLine($"[INFO] [XML] Dang tim chung thu voi Serial: {serial} trong Windows Store...");
+                Console.WriteLine($"[INFO] Dang tim chung thu voi Serial: {serial}...");
                 X509Certificate2 cert = FindCertificate(serial);
+                string matchedPkcs11Dll = null;
+                
+                Console.WriteLine("[INFO] Dang quet tim driver PKCS#11 phu hop de tu dong tranh hop thoai PIN...");
+                string foundDll = null;
+                var certPkcs = FindCertificateInPkcs11(serial, pin, out foundDll);
+                if (certPkcs != null)
+                {
+                    cert = certPkcs;
+                    matchedPkcs11Dll = foundDll;
+                }
+
                 if (cert == null)
                 {
-                    Console.Error.WriteLine($"CERTIFICATE_NOT_FOUND: Khong tim thay chung thu nao voi Serial: '{serial}'");
+                    Console.Error.WriteLine($"CERTIFICATE_NOT_FOUND: Khong tim thay chung thu nao voi Serial: '{serial}' trong Windows Store hoac PKCS#11.");
                     return 1;
                 }
 
-                Console.WriteLine($"[INFO] Da tim thay chung thu: {cert.Subject}");
-                SignXml(input, output, cert, pin);
-                Console.WriteLine("[INFO] Ky XML thanh cong!");
-                return 0;
+                if (matchedPkcs11Dll != null)
+                {
+                    try
+                    {
+                        Console.WriteLine($"[INFO] Dang tien hanh ky file XML bang PKCS#11: {input} -> {output}...");
+                        SignXml(input, output, cert, pin, matchedPkcs11Dll, tagSigning, tagReference);
+                        Console.WriteLine("[INFO] Ky XML bang PKCS#11 thanh cong!");
+                        ForceExit(0);
+                    }
+                    catch (Exception exPkcs11)
+                    {
+                        Console.Error.WriteLine($"[WARN] Ky XML bang PKCS#11 that bai: {exPkcs11.Message}. Fallback sang luong CNG/CAPI...");
+                    }
+                }
+
+                Console.WriteLine($"[INFO] Dang tien hanh ky file XML bang CNG/CAPI: {input} -> {output}...");
+                SignXml(input, output, cert, pin, null, tagSigning, tagReference);
+                Console.WriteLine("[INFO] Ky XML bang CNG/CAPI thanh cong!");
+                ForceExit(0);
             }
             catch (Exception ex)
             {
                 Console.Error.WriteLine($"[DEBUG_RAW_ERR] {ex.ToString()}");
-                return 1;
+                ForceExit(1);
             }
         }
 
@@ -228,38 +413,79 @@ class Program
 
         try
         {
-            Console.WriteLine($"[INFO] Dang tim chung thu voi Serial: {serial} trong Windows Store (CurrentUser/My)...");
+            Console.WriteLine($"[INFO] Dang tim chung thu voi Serial: {serial}...");
             X509Certificate2 cert = FindCertificate(serial);
-            if (cert == null)
+            string matchedPkcs11Dll = null;
+            Console.WriteLine("[INFO] Dang quet tim driver PKCS#11 phu hop de tu dong tranh hop thoai PIN...");
+            string foundDll = null;
+            var certPkcs = FindCertificateInPkcs11(serial, pin, out foundDll);
+            if (certPkcs != null)
             {
-                Console.Error.WriteLine($"CERTIFICATE_NOT_FOUND: Khong tim thay chung thu nao voi Serial: '{serial}' trong Windows Store.");
-                return 1;
+                cert = certPkcs;
+                matchedPkcs11Dll = foundDll;
             }
 
-            Console.WriteLine($"[INFO] Da tim thay chung thu: {cert.Subject}");
-            Console.WriteLine($"[INFO] Dang tien hanh ky file PDF: {input} -> {output}...");
-            SignPdf(input, output, cert, pin, page, llx, lly, urx, ury, desc, image);
-            Console.WriteLine("[INFO] Ky so thanh cong!");
-            return 0;
+            if (cert == null)
+            {
+                Console.Error.WriteLine($"CERTIFICATE_NOT_FOUND: Khong tim thay chung thu nao voi Serial: '{serial}' trong Windows Store hoac PKCS#11.");
+                ForceExit(1);
+            }
+
+            if (matchedPkcs11Dll != null)
+            {
+                try
+                {
+                    Console.WriteLine($"[INFO] Dang tien hanh ky file PDF bang PKCS#11: {input} -> {output}...");
+                    SignPdf(input, output, cert, pin, page, llx, lly, urx, ury, desc, image, colorStr, tsize,
+                            signmark, smWidth, smHeight, smOffsetX, smOffsetY, forceCng, matchedPkcs11Dll, pinFormat, smCenter);
+                    Console.WriteLine("[INFO] Ky so bang PKCS#11 thanh cong!");
+                    ForceExit(0);
+                }
+                catch (Exception exPkcs11)
+                {
+                    Console.Error.WriteLine($"[WARN] Ky bang PKCS#11 that bai: {exPkcs11.Message}. Fallback sang luong CNG/CAPI...");
+                }
+            }
+
+            Console.WriteLine($"[INFO] Dang tien hanh ky file PDF bang CNG/CAPI: {input} -> {output}...");
+            SignPdf(input, output, cert, pin, page, llx, lly, urx, ury, desc, image, colorStr, tsize,
+                    signmark, smWidth, smHeight, smOffsetX, smOffsetY, forceCng, null, pinFormat, smCenter);
+            Console.WriteLine("[INFO] Ky so bang CNG/CAPI thanh cong!");
+            ForceExit(0);
         }
         catch (Exception ex)
         {
             string msg = ex.Message;
             Console.Error.WriteLine($"[DEBUG_RAW_ERR] {ex.ToString()}");
-            if (msg.Contains("wrong PIN") || msg.Contains("incorrect PIN") || msg.Contains("PIN was presented") || msg.Contains("0x8009001A") || msg.Contains("context was acquired as silent"))
+            if (msg.Contains("0x000000A4") || msg.Contains("PIN_LOCKED"))
+            {
+                Console.Error.WriteLine("PIN_LOCKED: Ma PIN cua USB Token da bi KHOA do nhap sai nhieu lan. Vui long dung phan mem Quan ly Token de mo khoa PIN.");
+            }
+            else if (msg.Contains("wrong PIN") || msg.Contains("incorrect PIN") || msg.Contains("PIN was presented") || msg.Contains("0x8009001A") || msg.Contains("context was acquired as silent"))
             {
                 Console.Error.WriteLine("WRONG_PIN: Ma PIN cua USB Token khong chinh xac hoac thieu ma PIN.");
             }
             else if (msg.Contains("NTE_SILENT_CONTEXT") || msg.Contains("cancelled") || msg.Contains("cancelled by the user") || msg.Contains("0x80090022"))
             {
-                Console.Error.WriteLine("SIGN_CANCELLED: Thao tac ky bi huy hoac thieu ma PIN.");
+                Console.WriteLine("SIGN_CANCELLED: Thao tac ky bi huy hoac thieu ma PIN.");
             }
             else
             {
                 Console.Error.WriteLine($"UNKNOWN_ERROR: Loi khi ky so: {msg}");
             }
-            return 1;
+            ForceExit(1);
         }
+        return 0;
+    }
+
+    public static void ForceExit(int exitCode)
+    {
+        try
+        {
+            Win32.TerminateProcess(Win32.GetCurrentProcess(), (uint)exitCode);
+        }
+        catch {}
+        Environment.Exit(exitCode);
     }
 
     static X509Certificate2 FindCertificate(string serialNumber)
@@ -296,7 +522,18 @@ class Program
         float urx, 
         float ury, 
         string description, 
-        string imagePath)
+        string imagePath,
+        string colorStr,
+        float tsize,
+        string signmark,
+        float smWidth,
+        float smHeight,
+        float smOffsetX,
+        float smOffsetY,
+        bool forceCng,
+        string forcePkcs11DllPath = null,
+        string pinFormat = null,
+        bool smCenter = false)
     {
         Console.WriteLine("[DEBUG] Bat dau SignPdf...");
         // 1. Dung chuoi chung thu (cert chain)
@@ -305,7 +542,6 @@ class Program
         chainObj.ChainPolicy.VerificationFlags = X509VerificationFlags.AllFlags; // Bo qua xac thuc de chay nhanh offline
         chainObj.Build(cert);
         Console.WriteLine("[DEBUG] Dung x509 chain xong. So luong cert: " + chainObj.ChainElements.Count);
-
         var chain = new Org.BouncyCastle.X509.X509Certificate[chainObj.ChainElements.Count];
         for (int i = 0; i < chainObj.ChainElements.Count; i++)
         {
@@ -315,73 +551,387 @@ class Program
 
         // 2. Khoi tao doi tuong ky ngoai (IExternalSignature) ho tro PKCS#11, CNG va CSP
         IExternalSignature externalSignature;
-        string pkcs11DllPath = FindCompatiblePkcs11Dll(cert, pin);
+        string pkcs11DllPath = forcePkcs11DllPath; // Chi dung PKCS#11 khi chung thu khong co trong Windows Store va phai quet qua PKCS#11
 
         if (pkcs11DllPath != null)
         {
-            Console.WriteLine($"[INFO] Phat hien driver PKCS#11 tuong thich: {pkcs11DllPath}. Chuyen sang luong ky PKCS#11 de ky an 100%...");
+            Console.WriteLine($"[INFO] Phat hien/Ep su dung driver PKCS#11 tuong thich: {pkcs11DllPath}. Chuyen sang luong ky PKCS#11...");
             externalSignature = new Pkcs11Signature(pkcs11DllPath, pin, "SHA256");
         }
         else
         {
-            Console.WriteLine("[INFO] Su dung luong ky mac dinh CAPI/CNG...");
-            externalSignature = new CngUserSignature(cert, pin, "SHA256");
+            Console.WriteLine("[INFO] Su dung luong ky mac dinh CAPI/CNG de ky PDF...");
+            externalSignature = new CngUserSignature(cert, pin, "SHA256", pinFormat);
         }
 
         // 3. Mo va tao chu ky PDF
         using (PdfReader reader = new PdfReader(inputPath))
-        using (FileStream os = new FileStream(outputPath, FileMode.Create))
-        using (PdfStamper stamper = PdfStamper.CreateSignature(reader, os, '\0'))
         {
-            Console.WriteLine("[DEBUG] Da mo PdfReader, FileStream, PdfStamper...");
-            PdfSignatureAppearance appearance = stamper.SignatureAppearance;
-            
-            // Thiet lap vi tri chu ky visible
-            appearance.SetVisibleSignature(new iTextSharp.text.Rectangle(llx, lly, urx, ury), page, null);
+            int targetPage = page;
+            float actualLlx = llx;
+            float actualLly = lly;
+            float actualUrx = urx;
+            float actualUry = ury;
+            string targetFieldName = "Signature_" + Guid.NewGuid().ToString("N").Substring(0, 8);
+
+            if (!string.IsNullOrEmpty(signmark))
+            {
+                Console.WriteLine($"[INFO] Dang tim kiem vi tri signmark: '{signmark}'...");
+                bool found = false;
+
+                // 1. Kiem tra xem signmark co phai la ten mot AcroForm field trong PDF khong
+                try
+                {
+                    var fieldPositions = reader.AcroFields.GetFieldPositions(signmark);
+                    if (fieldPositions != null && fieldPositions.Count > 0)
+                    {
+                        var pos = fieldPositions[0];
+                        targetPage = pos.page;
+                        float markWidth = pos.position.Width;
+                        float markHeight = pos.position.Height;
+
+                        if (smCenter)
+                        {
+                            actualLlx = pos.position.Left + (markWidth / 2f) - (smWidth / 2f) + smOffsetX;
+                            actualLly = pos.position.Bottom + (markHeight / 2f) - (smHeight / 2f) + smOffsetY;
+                        }
+                        else
+                        {
+                            actualLlx = pos.position.Left + smOffsetX;
+                            actualLly = pos.position.Bottom + smOffsetY;
+                        }
+
+                        actualUrx = actualLlx + smWidth;
+                        actualUry = actualLly + smHeight;
+                        targetFieldName = signmark;
+                        found = true;
+                        Console.WriteLine($"[INFO] Da tim thay signmark duoi dang AcroField '{signmark}' tai Page {targetPage}, X={pos.position.Left}, Y={pos.position.Bottom}. Toa do ky: llx={actualLlx}, lly={actualLly}, urx={actualUrx}, ury={actualUry}");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[DEBUG] Kiem tra AcroFields loi: {ex.Message}");
+                }
+
+                // 2. Neu khong phai AcroField, tim theo noi dung chu (Text Anchor Search)
+                if (!found)
+                {
+                    var finder = new TextAnchorFinder(signmark);
+                    int totalPages = reader.NumberOfPages;
+                    for (int pNum = 1; pNum <= totalPages; pNum++)
+                    {
+                        finder.SetPage(pNum);
+                        iTextSharp.text.pdf.parser.PdfReaderContentParser parser = new iTextSharp.text.pdf.parser.PdfReaderContentParser(reader);
+                        parser.ProcessContent(pNum, finder);
+                        finder.OnPageEnd();
+
+                        if (finder.FoundX.HasValue && finder.FoundY.HasValue)
+                        {
+                            targetPage = finder.FoundPage;
+                            float markWidth = (finder.FoundEndX ?? finder.FoundX.Value) - finder.FoundX.Value;
+                            float markHeight = finder.FoundHeight ?? 10f;
+
+                            if (smCenter)
+                            {
+                                actualLlx = finder.FoundX.Value + (markWidth / 2f) - (smWidth / 2f) + smOffsetX;
+                                actualLly = finder.FoundY.Value + (markHeight / 2f) - (smHeight / 2f) + smOffsetY;
+                            }
+                            else
+                            {
+                                actualLlx = finder.FoundX.Value + smOffsetX;
+                                actualLly = finder.FoundY.Value + smOffsetY;
+                            }
+
+                            actualUrx = actualLlx + smWidth;
+                            actualUry = actualLly + smHeight;
+                            targetFieldName = "Signature_" + Guid.NewGuid().ToString("N").Substring(0, 8);
+                            found = true;
+                            Console.WriteLine($"[INFO] Da tim thay signmark tai Page {targetPage}, X={finder.FoundX.Value}, Y={finder.FoundY.Value}. Toa do ky: llx={actualLlx}, lly={actualLly}, urx={actualUrx}, ury={actualUry}");
+                            break;
+                        }
+                    }
+                }
+
+                if (!found)
+                {
+                    throw new Exception($"SIGNMARK_NOT_FOUND: Khong tim thay tu khoa signmark '{signmark}' trong file PDF.");
+                }
+            }
+
+            var existingSigs = reader.AcroFields.GetSignatureNames();
+            bool appendMode = existingSigs != null && existingSigs.Count > 0;
+            if (appendMode)
+            {
+                Console.WriteLine("[INFO] Phat hien PDF da co chu ky so. Kich hoat che do ky noi tiep (Append Mode)...");
+            }
+
+            using (FileStream os = new FileStream(outputPath, FileMode.Create))
+            using (PdfStamper stamper = PdfStamper.CreateSignature(reader, os, '\0', null, appendMode))
+            {
+                Console.WriteLine("[DEBUG] Da mo FileStream, PdfStamper...");
+                PdfSignatureAppearance appearance = stamper.SignatureAppearance;
+
+                // Thiet lap vi tri chu ky visible
+                appearance.SetVisibleSignature(new iTextSharp.text.Rectangle(actualLlx, actualLly, actualUrx, actualUry), targetPage, targetFieldName);
             
             // Build text thong tin nguoi ky
             string subjectCN = GetCertCN(cert);
+            Console.WriteLine($"[DEBUG] subjectCN lay duoc: '{subjectCN}'");
             string signingTimeStr = DateTime.Now.ToString("dd/MM/yyyy HH:mm:ss");
             string text = $"Ký bởi: {subjectCN}\nNgày ký: {signingTimeStr}";
+            Console.WriteLine($"[DEBUG] Chu ky text duoc build: '{text.Replace("\n", " | ")}'");
             if (!string.IsNullOrEmpty(description))
             {
                 text += $"\nLý do: {description}";
             }
-            appearance.Layer2Text = text;
 
             // Chen hinh anh ben trai va text ben phai neu co anh
-            if (!string.IsNullOrEmpty(imagePath) && File.Exists(imagePath))
+            Console.WriteLine($"[DEBUG] Nhan duoc imagePath: '{imagePath}'");
+            bool hasImage = !string.IsNullOrEmpty(imagePath) && File.Exists(imagePath);
+            Console.WriteLine($"[DEBUG] hasImage: {hasImage} (File.Exists: {(!string.IsNullOrEmpty(imagePath) && File.Exists(imagePath))})");
+            appearance.SignatureRenderingMode = PdfSignatureAppearance.RenderingMode.DESCRIPTION;
+            appearance.Acro6Layers = true;
+
+            BaseColor textColor = BaseColor.BLACK;
+            if (!string.IsNullOrEmpty(colorStr))
             {
-                iTextSharp.text.Image img = iTextSharp.text.Image.GetInstance(imagePath);
-                appearance.SignatureGraphic = img;
-                appearance.SignatureRenderingMode = PdfSignatureAppearance.RenderingMode.GRAPHIC_AND_DESCRIPTION;
+                try
+                {
+                    if (colorStr.Contains(","))
+                    {
+                        string[] rgb = colorStr.Split(',');
+                        if (rgb.Length == 3)
+                        {
+                            textColor = new BaseColor(int.Parse(rgb[0].Trim()), int.Parse(rgb[1].Trim()), int.Parse(rgb[2].Trim()));
+                        }
+                    }
+                    else
+                    {
+                        string hex = colorStr.TrimStart('#');
+                        if (hex.Length == 6)
+                        {
+                            textColor = new BaseColor(
+                                Convert.ToInt32(hex.Substring(0, 2), 16),
+                                Convert.ToInt32(hex.Substring(2, 2), 16),
+                                Convert.ToInt32(hex.Substring(4, 2), 16)
+                            );
+                        }
+                    }
+                }
+                catch
+                {
+                    textColor = new BaseColor(0, 70, 150);
+                }
             }
-            else
+
+            PdfTemplate layer2 = appearance.GetLayer(2);
+            float w = appearance.Rect.Width;
+            float h = appearance.Rect.Height;
+
+            BaseFont bf = null;
+            List<string> fontCandidates = new List<string>();
+            string winDir = Environment.GetEnvironmentVariable("windir") ?? "C:\\Windows";
+            string systemFontsDir = Path.Combine(winDir, "Fonts");
+            string userFontsDir = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "Microsoft\\Windows\\Fonts"
+            );
+            string appDir = AppDomain.CurrentDomain.BaseDirectory;
+
+            // 1. Uu tien font dat cung thu muc file chay (neu co)
+            fontCandidates.Add(Path.Combine(appDir, "arial.ttf"));
+            fontCandidates.Add(Path.Combine(appDir, "Arial.ttf"));
+            fontCandidates.Add(Path.Combine(appDir, "font.ttf"));
+
+            // 2. Danh sach cac font candidate trong he thong
+            string[] fontNames = {
+                "arial.ttf", "Arial.ttf", "ARIAL.TTF",
+                "times.ttf", "Times.ttf", "TIMES.TTF",
+                "tahoma.ttf", "Tahoma.ttf", "TAHOMA.TTF",
+                "calibri.ttf", "Calibri.ttf",
+                "segoeui.ttf"
+            };
+
+            foreach (var name in fontNames)
             {
-                appearance.SignatureRenderingMode = PdfSignatureAppearance.RenderingMode.DESCRIPTION;
+                fontCandidates.Add(Path.Combine(systemFontsDir, name));
+                fontCandidates.Add(Path.Combine(userFontsDir, name));
             }
+
+            foreach (var path in fontCandidates)
+            {
+                try
+                {
+                    bf = BaseFont.CreateFont(path, BaseFont.IDENTITY_H, BaseFont.EMBEDDED);
+                    if (bf != null)
+                    {
+                        Console.WriteLine($"[DEBUG] Da load thanh cong font: {path}");
+                        break;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    // Chi in ra log khi file thuc su ton tai ma load loi de giam rac log
+                    if (File.Exists(path))
+                    {
+                        Console.WriteLine($"[DEBUG] Thu load font {path} nhung loi: {ex.Message}");
+                    }
+                }
+            }
+
+            if (bf == null)
+            {
+                try
+                {
+                    if (Directory.Exists(systemFontsDir))
+                    {
+                        var ttfFiles = Directory.GetFiles(systemFontsDir, "*.ttf");
+                        foreach (var path in ttfFiles)
+                        {
+                            try
+                            {
+                                bf = BaseFont.CreateFont(path, BaseFont.IDENTITY_H, BaseFont.EMBEDDED);
+                                if (bf != null)
+                                {
+                                    Console.WriteLine($"[DEBUG] Da load thanh cong font fallback tu dong: {path}");
+                                    break;
+                                }
+                            }
+                            catch {}
+                        }
+                    }
+                }
+                catch {}
+            }
+
+            if (bf == null)
+            {
+                Console.WriteLine("[WARN] Khong load duoc font Unicode nao, quay lai Helvetica.");
+                bf = BaseFont.CreateFont(BaseFont.HELVETICA, BaseFont.CP1252, BaseFont.NOT_EMBEDDED);
+            }
+
+            float textLeft = 3;
+            if (hasImage)
+            {
+                try
+                {
+                    iTextSharp.text.Image img = iTextSharp.text.Image.GetInstance(imagePath);
+                    // Anh chiem toi da 40% chieu rong, co dan theo chieu cao o ky
+                    float maxImgW = w * 0.4f;
+                    img.ScaleToFit(maxImgW, h - 6);
+                    
+                    float imgX = 5; // Cach trai 5px
+                    float imgY = (h - img.ScaledHeight) / 2; // Can giua doc
+                    img.SetAbsolutePosition(imgX, imgY);
+                    layer2.AddImage(img);
+                    
+                    textLeft = imgX + img.ScaledWidth + 8; // Chu bat dau sat ngay sau anh (cach anh 8px)
+                }
+                catch (Exception imgEx)
+                {
+                    Console.WriteLine($"[DEBUG] Loi ve anh vao Layer 2: {imgEx.Message}");
+                    textLeft = 3;
+                }
+            }
+
+             Font font = new Font(bf, tsize, Font.NORMAL, textColor);
+             float leading = tsize * 1.25f;
+             
+             // 1. Chay thu de do chieu cao thuc te cua khoi text sau khi tu dong xuong dong (Word Wrap)
+             ColumnText ctMeasure = new ColumnText(layer2);
+             ctMeasure.SetSimpleColumn(new Phrase(text, font), textLeft, 0, w - 3, h, leading, Element.ALIGN_LEFT);
+             ctMeasure.Go(true); // Che do mo phong
+             
+             float textHeight = h - ctMeasure.YLine;
+             float shift = (h - textHeight) / 2f;
+             if (shift < 0) shift = 0;
+             
+             float margin = 3f; // Khoang dem an toan tranh lam tron so lam mat chu
+             float yTop = h - shift + margin;
+             if (yTop > h) yTop = h;
+             float yBottom = yTop - textHeight - (margin * 2f);
+             if (yBottom < 0) yBottom = 0;
+ 
+             // 2. Ve thuc te voi toa do da can giua chinh xac
+             ColumnText ctDraw = new ColumnText(layer2);
+             ctDraw.SetSimpleColumn(new Phrase(text, font), textLeft, yBottom, w - 3, yTop, leading, Element.ALIGN_LEFT);
+             ctDraw.Go();
 
             // Thuc hien ky so detached CMS
             Console.WriteLine("[DEBUG] Dang goi MakeSignature.SignDetached...");
             MakeSignature.SignDetached(appearance, externalSignature, chain, null, null, null, 0, CryptoStandard.CMS);
             Console.WriteLine("[DEBUG] Da goi xong MakeSignature.SignDetached...");
+            }
         }
         Console.WriteLine("[DEBUG] Da dong va hoan tat PdfStamper.");
     }
 
-    static void SignXml(string inputPath, string outputPath, X509Certificate2 cert, string pin)
+    static void SignXml(string inputPath, string outputPath, X509Certificate2 cert, string pin, string forcePkcs11DllPath = null, string tagSigning = null, string tagReference = null)
     {
         Console.WriteLine("[DEBUG] Bat dau SignXml...");
         XmlDocument xmlDoc = new XmlDocument();
         xmlDoc.PreserveWhitespace = true;
-        xmlDoc.Load(inputPath);
+        try
+        {
+            xmlDoc.Load(inputPath);
+        }
+        catch (XmlException xmlEx)
+        {
+            Console.WriteLine($"[INFO] Gap loi phan tich XML: {xmlEx.Message}. Tien hanh tu dong sua loi tuong thich HTML/XHTML (self-closing tags)...");
+            try
+            {
+                string rawText = File.ReadAllText(inputPath, Encoding.UTF8);
+                string pattern = @"<(meta|br|input|link|img|hr)(?:\s+([^>]*?))?\s*(?<!/)>";
+                string sanitized = System.Text.RegularExpressions.Regex.Replace(
+                    rawText,
+                    pattern,
+                    "<$1 $2 />",
+                    System.Text.RegularExpressions.RegexOptions.IgnoreCase
+                );
+                sanitized = System.Text.RegularExpressions.Regex.Replace(sanitized, @"\s+/>", " />");
+                
+                // Tu dong giai ma tat ca cac thuc the HTML (vi du &nbsp;, &deg;) ve ky tu Unicode goc, tru 5 thuc the co ban cua XML
+                sanitized = System.Text.RegularExpressions.Regex.Replace(sanitized, @"&[a-zA-Z0-9#]+;", match =>
+                {
+                    string entity = match.Value;
+                    string lower = entity.ToLower();
+                    if (lower == "&amp;" || lower == "&lt;" || lower == "&gt;" || lower == "&quot;" || lower == "&apos;")
+                    {
+                        return entity; // Giu nguyen 5 thuc the XML bat buoc
+                    }
+                    return System.Net.WebUtility.HtmlDecode(entity); // Giai ma cac thuc the HTML khac thanh ky tu Unicode goc
+                });
 
-        string pkcs11DllPath = FindCompatiblePkcs11Dll(cert, pin);
+                // Tu dong bao boc noi dung trong the <script> va <style> bang CDATA de tranh ky tu <, > gay loi XML
+                string scriptPattern = @"<(script|style)\b[^>]*>(.*?)</\1>";
+                sanitized = System.Text.RegularExpressions.Regex.Replace(
+                    sanitized,
+                    scriptPattern,
+                    match => {
+                        string tag = match.Groups[1].Value;
+                        string content = match.Groups[2].Value;
+                        if (content.Contains("<![CDATA[")) return match.Value;
+                        return $"<{tag}>\n//<![CDATA[\n" + content + $"\n//]]>\n</{tag}>";
+                    },
+                    System.Text.RegularExpressions.RegexOptions.Singleline | System.Text.RegularExpressions.RegexOptions.IgnoreCase
+                );
+                
+                xmlDoc.LoadXml(sanitized);
+                Console.WriteLine("[INFO] Tu dong sua va nap XML thanh cong.");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[ERROR] Tu dong sua XML that bai: {ex.Message}");
+                throw; // Quang lai loi phan tich thuc te de thong bao ro rang loi nam o dau
+            }
+        }
+
+        string pkcs11DllPath = forcePkcs11DllPath; // Chỉ dùng PKCS#11 khi chứng thư không có trong Windows Store và phải quét qua PKCS#11
         RSA rsaKey = null;
 
         if (pkcs11DllPath != null)
         {
-            Console.WriteLine($"[INFO] Phat hien driver PKCS#11: {pkcs11DllPath}. Dung PKCS#11 de ky XML...");
+            Console.WriteLine($"[INFO] Phat hien/Ep su dung driver PKCS#11: {pkcs11DllPath}. Dung PKCS#11 de ky XML...");
             var pkcs = new Pkcs11Signature(pkcs11DllPath, pin, "SHA256");
             rsaKey = new Pkcs11Rsa(pkcs, cert);
         }
@@ -393,29 +943,7 @@ class Program
 
         try
         {
-            SignedXml signedXml = new SignedXml(xmlDoc);
-            signedXml.SigningKey = rsaKey;
-
-            Reference reference = new Reference();
-            reference.Uri = ""; // Sign the entire document
-            reference.DigestMethod = "http://www.w3.org/2001/04/xmlenc#sha256";
-
-            XmlDsigEnvelopedSignatureTransform env = new XmlDsigEnvelopedSignatureTransform();
-            reference.AddTransform(env);
-
-            signedXml.AddReference(reference);
-
-            KeyInfo keyInfo = new KeyInfo();
-            KeyInfoX509Data x509Data = new KeyInfoX509Data(cert);
-            keyInfo.AddClause(x509Data);
-            signedXml.KeyInfo = keyInfo;
-
-            signedXml.SignedInfo.SignatureMethod = "http://www.w3.org/2001/04/xmldsig-more#rsa-sha256";
-
-            signedXml.ComputeSignature();
-
-            XmlElement xmlDigitalSignature = signedXml.GetXml();
-            xmlDoc.DocumentElement.AppendChild(xmlDoc.ImportNode(xmlDigitalSignature, true));
+            XmlSignatureBuilder.Sign(xmlDoc, rsaKey, cert, tagSigning, tagReference);
 
             xmlDoc.Save(outputPath);
             Console.WriteLine("[DEBUG] Da ky XML va luu file thanh cong.");
@@ -426,8 +954,47 @@ class Program
         }
     }
 
+    private static bool IsHardwareKey(RSA rsa)
+    {
+        try
+        {
+            if (rsa is RSACryptoServiceProvider rsaCsp)
+            {
+                var info = rsaCsp.CspKeyContainerInfo;
+                if (info.HardwareDevice) return true;
+                
+                string provName = info.ProviderName.ToLower();
+                if (provName.Contains("smart card") || provName.Contains("token") || provName.Contains("ca") || provName.Contains("csp"))
+                {
+                    if (!provName.Contains("software") && !provName.Contains("strong") && !provName.Contains("enhanced") && !provName.Contains("base"))
+                        return true;
+                }
+            }
+            else if (rsa is RSACng rsaCng)
+            {
+                string provName = rsaCng.Key.Provider.Provider.ToLower();
+                if (provName.Contains("software")) return false;
+                
+                if (provName.Contains("smart card") || provName.Contains("token") || provName.Contains("ca") || provName.Contains("ksp"))
+                    return true;
+            }
+        }
+        catch {}
+        return false;
+    }
+
     static string GetCertCN(X509Certificate2 cert)
     {
+        try
+        {
+            string cn = cert.GetNameInfo(X509NameType.SimpleName, false);
+            if (!string.IsNullOrEmpty(cn))
+            {
+                return cn;
+            }
+        }
+        catch {}
+
         string subject = cert.Subject;
         foreach (string part in subject.Split(','))
         {
@@ -444,16 +1011,50 @@ class Program
     {
         try
         {
-            var tempSigObj = new CngUserSignature(cert, pin, "SHA256");
-            var provInfoOpt = tempSigObj.GetKeyProvInfo();
-            if (provInfoOpt != null && !string.IsNullOrEmpty(provInfoOpt.Value.pwszProvName))
+            string pattern = null;
+            Console.WriteLine($"[DEBUG_COMPAT_DLL] Issuer={cert.Issuer}, Subject={cert.Subject}");
+            
+            // Fallback 1: Quét theo thông tin Provider của Key nếu có
+            try
             {
-                string providerName = provInfoOpt.Value.pwszProvName;
-                string pattern = null;
-                if (providerName.Contains("ICA")) pattern = "ica_csp11_v1";
-                else if (providerName.Contains("NC-CA")) pattern = "ncca_csp11_v1";
-                else return null;
+                var tempSigObj = new CngUserSignature(cert, pin, "SHA256");
+                var provInfoOpt = tempSigObj.GetKeyProvInfo();
+                if (provInfoOpt != null && !string.IsNullOrEmpty(provInfoOpt.Value.pwszProvName))
+                {
+                    string providerName = provInfoOpt.Value.pwszProvName.ToUpper();
+                    Console.WriteLine($"[DEBUG_COMPAT_DLL] Provider={providerName}");
+                    if (providerName.Contains("ICA")) pattern = "ica_csp11_v1";
+                    else if (providerName.Contains("NC-CA") || providerName.Contains("NCCA")) pattern = "ncca_csp11_v1";
+                    else if (providerName.Contains("VNPT")) pattern = "vnptca_p11_v8";
+                }
+                else
+                {
+                    Console.WriteLine("[DEBUG_COMPAT_DLL] provInfoOpt is null or pwszProvName is empty");
+                }
+            }
+            catch (Exception exProv)
+            {
+                Console.WriteLine($"[DEBUG_COMPAT_DLL] Fallback 1 threw: {exProv.Message}");
+            }
+            
+            // Fallback 2: Nếu không thấy provider, quét theo Issuer/Subject của chứng thư
+            if (pattern == null)
+            {
+                string issuer = cert.Issuer.ToUpper();
+                string subject = cert.Subject.ToUpper();
+                Console.WriteLine($"[DEBUG_COMPAT_DLL] Fallback 2: issuer={issuer}, subject={subject}");
+                if (issuer.Contains("I-CA") || issuer.Contains("ICA") || subject.Contains("I-CA") || subject.Contains("ICA"))
+                    pattern = "ica_csp11_v1";
+                else if (issuer.Contains("NC-CA") || issuer.Contains("NCCA") || subject.Contains("NC-CA") || subject.Contains("NCCA"))
+                    pattern = "ncca_csp11_v1";
+                else if (issuer.Contains("VNPT") || subject.Contains("VNPT"))
+                    pattern = "vnptca_p11_v8";
+            }
 
+            Console.WriteLine($"[DEBUG_COMPAT_DLL] Selected pattern: {pattern}");
+
+            if (pattern != null)
+            {
                 string[] searchDirs = { 
                     Environment.GetFolderPath(Environment.SpecialFolder.System),
                     Environment.GetFolderPath(Environment.SpecialFolder.SystemX86)
@@ -464,12 +1065,20 @@ class Program
                     if (Directory.Exists(dir))
                     {
                         string normalPath = Path.Combine(dir, pattern + ".dll");
-                        if (File.Exists(normalPath)) return normalPath;
+                        Console.WriteLine($"[DEBUG_COMPAT_DLL] Checking path: {normalPath}");
+                        if (File.Exists(normalPath))
+                        {
+                            Console.WriteLine($"[DEBUG_COMPAT_DLL] Found DLL: {normalPath}");
+                            return normalPath;
+                        }
                     }
                 }
             }
         }
-        catch {}
+        catch (Exception exGlobal)
+        {
+            Console.WriteLine($"[DEBUG_COMPAT_DLL] Global exception: {exGlobal.Message}");
+        }
         return null;
     }
 
@@ -579,6 +1188,479 @@ class Program
             Console.WriteLine($"Error parsing exports: {ex.Message}");
         }
     }
+
+    static List<string> FindAllPkcs11Dlls()
+    {
+        var paths = new List<string>();
+        string sys32 = Environment.GetFolderPath(Environment.SpecialFolder.System);
+        if (!Directory.Exists(sys32)) return paths;
+
+        // 1. Uu tien tuyet doi cac file driver chinh thuc cua cac nha mang Viet Nam
+        string[] preferredNames = {
+            "ica_csp11_v1.dll", 
+            "vnptca_p11_v8.dll",
+            "ncca_csp11_v1.dll",
+            "vnpt-ca_csp11.dll", "vnpt-ca_csp11_x64.dll",
+            "viettel-ca_v5.dll", "viettel-ca_v6.dll",
+            "fpt-ca.dll", "bkavca_p11.dll", "eps_p11.dll"
+        };
+
+        foreach (var name in preferredNames)
+        {
+            string p = Path.Combine(sys32, name);
+            if (File.Exists(p) && !paths.Contains(p))
+            {
+                paths.Add(p);
+            }
+        }
+
+        // 2. Quet du phong bang glob neu khong tim thay file nao trong danh sach uu tien
+        if (paths.Count == 0)
+        {
+            string[] patterns = { "*csp11*.dll", "*pkcs11*.dll" };
+            foreach (var pat in patterns)
+            {
+                try
+                {
+                    foreach (var file in Directory.GetFiles(sys32, pat))
+                    {
+                        string nameLower = Path.GetFileName(file).ToLower();
+                        // Loai bo cac file runtime hoac file phu tro (_s.dll)
+                        if (nameLower.EndsWith("_s.dll") || nameLower.Contains("msvcp") || nameLower.Contains("vcruntime"))
+                            continue;
+
+                        if (!paths.Contains(file))
+                        {
+                            paths.Add(file);
+                        }
+                    }
+                }
+                catch {}
+            }
+        }
+
+        return paths;
+    }
+
+    static List<Tuple<string, string>> ListCertificatesFromPkcs11(string dllPath, string pin)
+    {
+        var result = new List<Tuple<string, string>>();
+        IntPtr hModule = Win32.LoadLibrary(dllPath);
+        if (hModule == IntPtr.Zero) return result;
+
+        try
+        {
+            var cInitialize = GetFuncLocal<C_Initialize>(hModule, "C_Initialize");
+            var cFinalize = GetFuncLocal<C_Finalize>(hModule, "C_Finalize");
+            var cGetSlotList = GetFuncLocal<C_GetSlotList>(hModule, "C_GetSlotList");
+            var cOpenSession = GetFuncLocal<C_OpenSession>(hModule, "C_OpenSession");
+            var cCloseSession = GetFuncLocal<C_CloseSession>(hModule, "C_CloseSession");
+            var cFindObjectsInit = GetFuncLocal<C_FindObjectsInit>(hModule, "C_FindObjectsInit");
+            var cFindObjects = GetFuncLocal<C_FindObjects>(hModule, "C_FindObjects");
+            var cFindObjectsFinal = GetFuncLocal<C_FindObjectsFinal>(hModule, "C_FindObjectsFinal");
+            var cGetAttributeValue = GetFuncLocal<C_GetAttributeValue>(hModule, "C_GetAttributeValue");
+            var cLogin = GetFuncLocal<C_Login>(hModule, "C_Login");
+            var cLogout = GetFuncLocal<C_Logout>(hModule, "C_Logout");
+
+            if (cInitialize == null || cFinalize == null || cGetSlotList == null ||
+                cOpenSession == null || cCloseSession == null || cFindObjectsInit == null ||
+                cFindObjects == null || cFindObjectsFinal == null || cGetAttributeValue == null)
+            {
+                Console.WriteLine($"[DEBUG_PKCS11] Some delegates are null for {Path.GetFileName(dllPath)}: " +
+                    $"Init={cInitialize != null}, Final={cFinalize != null}, Slot={cGetSlotList != null}, " +
+                    $"Open={cOpenSession != null}, Close={cCloseSession != null}, FindInit={cFindObjectsInit != null}, " +
+                    $"Find={cFindObjects != null}, FindFinal={cFindObjectsFinal != null}, GetAttr={cGetAttributeValue != null}");
+                return result;
+            }
+
+            uint rv = cInitialize(IntPtr.Zero);
+            Console.WriteLine($"[DEBUG_PKCS11] {Path.GetFileName(dllPath)} C_Initialize returned 0x{rv:X8}");
+            if (rv != 0 && rv != 0x00000191) return result;
+
+            try
+            {
+                uint count = 0;
+                rv = cGetSlotList(1, IntPtr.Zero, ref count);
+                Console.WriteLine($"[DEBUG_PKCS11] {Path.GetFileName(dllPath)} C_GetSlotList count returned 0x{rv:X8}, count={count}");
+                if (rv != 0 || count == 0) return result;
+
+                IntPtr pSlots = Marshal.AllocHGlobal((int)count * 4);
+                try
+                {
+                    rv = cGetSlotList(1, pSlots, ref count);
+                    if (rv != 0) return result;
+
+                    int[] slots = new int[count];
+                    Marshal.Copy(pSlots, slots, 0, (int)count);
+
+                    for (int s = 0; s < count; s++)
+                    {
+                        uint slotId = (uint)slots[s];
+                        IntPtr hSession;
+                        rv = cOpenSession(slotId, Pkcs11Const.CKF_SERIAL_SESSION, IntPtr.Zero, IntPtr.Zero, out hSession); // CKF_SERIAL_SESSION = 4
+                        Console.WriteLine($"[DEBUG_PKCS11] {Path.GetFileName(dllPath)} C_OpenSession returned 0x{rv:X8}");
+                        if (rv != 0) continue;
+
+                        try
+                        {
+                            bool loggedIn = false;
+                            if (cLogin != null && !string.IsNullOrEmpty(pin))
+                            {
+                                byte[] pinBytes = Encoding.UTF8.GetBytes(pin);
+                                uint rvLogin = cLogin(hSession, 1, pinBytes, (uint)pinBytes.Length); // CKU_USER = 1
+                                Console.WriteLine($"[DEBUG_PKCS11] {Path.GetFileName(dllPath)} C_Login returned 0x{rvLogin:X8}");
+                                loggedIn = (rvLogin == 0 || rvLogin == 0x00000100); // CKR_USER_ALREADY_LOGGED_IN = 0x100
+                            }
+
+                            IntPtr pClassVal = Marshal.AllocHGlobal(4);
+                            Marshal.WriteInt32(pClassVal, 1); // CKO_CERTIFICATE = 1
+                            try
+                            {
+                                CK_ATTRIBUTE[] template = new CK_ATTRIBUTE[1];
+                                template[0].type = 0; // CKA_CLASS = 0
+                                template[0].pValue = pClassVal;
+                                template[0].ulValueLen = 4;
+
+                                rv = cFindObjectsInit(hSession, template, 1);
+                                Console.WriteLine($"[DEBUG_PKCS11] {Path.GetFileName(dllPath)} C_FindObjectsInit returned 0x{rv:X8}");
+                                if (rv != 0) continue;
+
+                                try
+                                {
+                                    IntPtr phObject = Marshal.AllocHGlobal(400);
+                                    try
+                                    {
+                                        uint objCount = 0;
+                                        rv = cFindObjects(hSession, phObject, 100, out objCount);
+                                        Console.WriteLine($"[DEBUG_PKCS11] {Path.GetFileName(dllPath)} C_FindObjects returned 0x{rv:X8}, count={objCount}");
+                                        if (rv == 0 && objCount > 0)
+                                        {
+                                            int[] handles = new int[objCount];
+                                            Marshal.Copy(phObject, handles, 0, (int)objCount);
+
+                                            for (int i = 0; i < objCount; i++)
+                                            {
+                                                IntPtr hObj = (IntPtr)handles[i];
+                                                
+                                                // Query CKA_CLASS
+                                                CK_ATTRIBUTE[] classAttr = new CK_ATTRIBUTE[1];
+                                                classAttr[0].type = 0x00000000;
+                                                classAttr[0].pValue = Marshal.AllocHGlobal(4);
+                                                classAttr[0].ulValueLen = 4;
+                                                uint rvClass = cGetAttributeValue(hSession, hObj, classAttr, 1);
+                                                uint classVal = (rvClass == 0) ? (uint)Marshal.ReadInt32(classAttr[0].pValue) : 999;
+                                                Marshal.FreeHGlobal(classAttr[0].pValue);
+
+                                                // Query CKA_LABEL (Pre-allocated buffer to support all driver types)
+                                                string labelStr = "";
+                                                IntPtr pLabel = Marshal.AllocHGlobal(512);
+                                                try
+                                                {
+                                                    CK_ATTRIBUTE[] labelAttr = new CK_ATTRIBUTE[1];
+                                                    labelAttr[0].type = 0x00000003; // CKA_LABEL
+                                                    labelAttr[0].pValue = pLabel;
+                                                    labelAttr[0].ulValueLen = 512;
+                                                    
+                                                    uint rvLabel = cGetAttributeValue(hSession, hObj, labelAttr, 1);
+                                                    if (rvLabel == 0 && labelAttr[0].ulValueLen > 0 && labelAttr[0].ulValueLen <= 512)
+                                                    {
+                                                        byte[] labelBytes = new byte[labelAttr[0].ulValueLen];
+                                                        Marshal.Copy(pLabel, labelBytes, 0, (int)labelAttr[0].ulValueLen);
+                                                        labelStr = Encoding.UTF8.GetString(labelBytes).Trim();
+                                                    }
+                                                }
+                                                catch {}
+                                                finally
+                                                {
+                                                    Marshal.FreeHGlobal(pLabel);
+                                                }
+
+                                                Console.WriteLine($"[DEBUG_PKCS11] Object[{i}]: Handle={handles[i]}, Class={classVal}, Label='{labelStr}', rvClass=0x{rvClass:X8}");
+
+                                                // Query CKA_VALUE (Pre-allocated buffer to support all driver types)
+                                                byte[] certBytes = null;
+                                                IntPtr pCertVal = Marshal.AllocHGlobal(8192);
+                                                try
+                                                {
+                                                    CK_ATTRIBUTE[] valAttr = new CK_ATTRIBUTE[1];
+                                                    valAttr[0].type = 0x00000011; // CKA_VALUE
+                                                    valAttr[0].pValue = pCertVal;
+                                                    valAttr[0].ulValueLen = 8192;
+
+                                                    uint rvData = cGetAttributeValue(hSession, hObj, valAttr, 1);
+                                                    Console.WriteLine($"[DEBUG_PKCS11] {Path.GetFileName(dllPath)} C_GetAttributeValue (CKA_VALUE) returned 0x{rvData:X8}, len={valAttr[0].ulValueLen}");
+                                                    if (rvData == 0 && valAttr[0].ulValueLen > 0 && valAttr[0].ulValueLen <= 8192)
+                                                    {
+                                                        certBytes = new byte[valAttr[0].ulValueLen];
+                                                        Marshal.Copy(pCertVal, certBytes, 0, (int)valAttr[0].ulValueLen);
+                                                    }
+                                                }
+                                                catch {}
+                                                finally
+                                                {
+                                                    Marshal.FreeHGlobal(pCertVal);
+                                                }
+
+                                                if (certBytes != null)
+                                                {
+                                                    try
+                                                    {
+                                                        X509Certificate2 cert = new X509Certificate2(certBytes);
+                                                        string serial = cert.SerialNumber.Replace(" ", "").Replace(":", "").ToUpper();
+                                                        string cn = GetCertCN(cert);
+                                                        Console.WriteLine($"[DEBUG_PKCS11] Success! Serial={serial}, CN={cn}");
+                                                        result.Add(Tuple.Create(serial, cn));
+                                                    }
+                                                    catch (Exception exCert)
+                                                    {
+                                                        Console.WriteLine($"[DEBUG_PKCS11] Error creating X509Certificate2: {exCert.Message}");
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                    finally
+                                    {
+                                        Marshal.FreeHGlobal(phObject);
+                                    }
+                                }
+                                finally
+                                {
+                                    cFindObjectsFinal(hSession);
+                                }
+                            }
+                            finally
+                            {
+                                if (loggedIn && cLogout != null)
+                                {
+                                    cLogout(hSession);
+                                }
+                                Marshal.FreeHGlobal(pClassVal);
+                            }
+                        }
+                        finally
+                        {
+                            cCloseSession(hSession);
+                        }
+                    }
+                }
+                finally
+                {
+                    Marshal.FreeHGlobal(pSlots);
+                }
+            }
+            finally
+            {
+                cFinalize(IntPtr.Zero);
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[DEBUG_PKCS11_ERR] Loi nạp hoăc quet {Path.GetFileName(dllPath)}: {ex.Message}");
+        }
+        finally
+        {
+            Win32.FreeLibrary(hModule);
+        }
+
+        return result;
+    }
+
+    static X509Certificate2 FindCertificateInPkcs11(string serialNumber, string pin, out string matchedDllPath)
+    {
+        matchedDllPath = null;
+        string cleanSerial = serialNumber.Replace(" ", "").Replace(":", "").ToUpper();
+        try
+        {
+            var dllPaths = FindAllPkcs11Dlls();
+            foreach (var dllPath in dllPaths)
+            {
+                var pkcsCerts = ListCertificatesFromPkcs11(dllPath, pin);
+                foreach (var pair in pkcsCerts)
+                {
+                    if (pair.Item1.ToUpper() == cleanSerial)
+                    {
+                        IntPtr hModule = Win32.LoadLibrary(dllPath);
+                        if (hModule != IntPtr.Zero)
+                        {
+                            try
+                            {
+                                var cInitialize = GetFuncLocal<C_Initialize>(hModule, "C_Initialize");
+                                var cFinalize = GetFuncLocal<C_Finalize>(hModule, "C_Finalize");
+                                var cGetSlotList = GetFuncLocal<C_GetSlotList>(hModule, "C_GetSlotList");
+                                var cOpenSession = GetFuncLocal<C_OpenSession>(hModule, "C_OpenSession");
+                                var cCloseSession = GetFuncLocal<C_CloseSession>(hModule, "C_CloseSession");
+                                var cFindObjectsInit = GetFuncLocal<C_FindObjectsInit>(hModule, "C_FindObjectsInit");
+                                var cFindObjects = GetFuncLocal<C_FindObjects>(hModule, "C_FindObjects");
+                                var cFindObjectsFinal = GetFuncLocal<C_FindObjectsFinal>(hModule, "C_FindObjectsFinal");
+                                var cGetAttributeValue = GetFuncLocal<C_GetAttributeValue>(hModule, "C_GetAttributeValue");
+                                var cLogin = GetFuncLocal<C_Login>(hModule, "C_Login");
+                                var cLogout = GetFuncLocal<C_Logout>(hModule, "C_Logout");
+
+                                if (cInitialize == null || cFinalize == null || cGetSlotList == null ||
+                                    cOpenSession == null || cCloseSession == null || cFindObjectsInit == null ||
+                                    cFindObjects == null || cFindObjectsFinal == null || cGetAttributeValue == null)
+                                {
+                                    return null;
+                                }
+
+                                uint rv = cInitialize(IntPtr.Zero);
+                                if (rv == 0 || rv == 0x00000191)
+                                {
+                                    try
+                                    {
+                                        uint count = 0;
+                                        rv = cGetSlotList(1, IntPtr.Zero, ref count);
+                                        if (rv == 0 && count > 0)
+                                        {
+                                            IntPtr pSlots = Marshal.AllocHGlobal((int)count * 4);
+                                            try
+                                            {
+                                                rv = cGetSlotList(1, pSlots, ref count);
+                                                if (rv == 0)
+                                                {
+                                                    int[] slots = new int[count];
+                                                    Marshal.Copy(pSlots, slots, 0, (int)count);
+
+                                                    for (int s = 0; s < count; s++)
+                                                    {
+                                                        uint slotId = (uint)slots[s];
+                                                        IntPtr hSession;
+                                                        rv = cOpenSession(slotId, Pkcs11Const.CKF_SERIAL_SESSION, IntPtr.Zero, IntPtr.Zero, out hSession);
+                                                        if (rv == 0)
+                                                        {
+                                                            try
+                                                            {
+                                                                bool loggedIn = false;
+                                                                if (cLogin != null && !string.IsNullOrEmpty(pin))
+                                                                {
+                                                                    byte[] pinBytes = Encoding.UTF8.GetBytes(pin);
+                                                                    uint rvLogin = cLogin(hSession, 1, pinBytes, (uint)pinBytes.Length); // CKU_USER = 1
+                                                                    loggedIn = (rvLogin == 0 || rvLogin == 0x00000100);
+                                                                }
+
+                                                                IntPtr pClassVal = Marshal.AllocHGlobal(4);
+                                                                Marshal.WriteInt32(pClassVal, 1); // CKO_CERTIFICATE = 1
+                                                                try
+                                                                {
+                                                                    CK_ATTRIBUTE[] template = new CK_ATTRIBUTE[1];
+                                                                    template[0].type = 0;
+                                                                    template[0].pValue = pClassVal;
+                                                                    template[0].ulValueLen = 4;
+
+                                                                    rv = cFindObjectsInit(hSession, template, 1);
+                                                                    if (rv == 0)
+                                                                    {
+                                                                        try
+                                                                        {
+                                                                            IntPtr phObject = Marshal.AllocHGlobal(400);
+                                                                            try
+                                                                            {
+                                                                                uint objCount;
+                                                                                rv = cFindObjects(hSession, phObject, 100, out objCount);
+                                                                                if (rv == 0 && objCount > 0)
+                                                                                {
+                                                                                    int[] handles = new int[objCount];
+                                                                                    Marshal.Copy(phObject, handles, 0, (int)objCount);
+
+                                                                                    for (int i = 0; i < objCount; i++)
+                                                                                    {
+                                                                                        IntPtr hObj = (IntPtr)handles[i];
+                                                                                        byte[] certBytes = null;
+                                                                                        IntPtr pCertVal = Marshal.AllocHGlobal(8192);
+                                                                                        try
+                                                                                        {
+                                                                                            CK_ATTRIBUTE[] valAttr = new CK_ATTRIBUTE[1];
+                                                                                            valAttr[0].type = 0x00000011; // CKA_VALUE
+                                                                                            valAttr[0].pValue = pCertVal;
+                                                                                            valAttr[0].ulValueLen = 8192;
+
+                                                                                            uint rvData = cGetAttributeValue(hSession, hObj, valAttr, 1);
+                                                                                            if (rvData == 0 && valAttr[0].ulValueLen > 0 && valAttr[0].ulValueLen <= 8192)
+                                                                                            {
+                                                                                                certBytes = new byte[valAttr[0].ulValueLen];
+                                                                                                Marshal.Copy(pCertVal, certBytes, 0, (int)valAttr[0].ulValueLen);
+                                                                                            }
+                                                                                        }
+                                                                                        catch {}
+                                                                                        finally
+                                                                                        {
+                                                                                            Marshal.FreeHGlobal(pCertVal);
+                                                                                        }
+
+                                                                                        if (certBytes != null)
+                                                                                        {
+                                                                                            try
+                                                                                            {
+                                                                                                X509Certificate2 cert = new X509Certificate2(certBytes);
+                                                                                                string certSerial = cert.SerialNumber.Replace(" ", "").Replace(":", "").ToUpper();
+                                                                                                if (certSerial == cleanSerial)
+                                                                                                {
+                                                                                                    matchedDllPath = dllPath;
+                                                                                                    return cert;
+                                                                                                }
+                                                                                            }
+                                                                                            catch {}
+                                                                                        }
+                                                                                    }
+                                                                                }
+                                                                            }
+                                                                            finally
+                                                                            {
+                                                                                Marshal.FreeHGlobal(phObject);
+                                                                            }
+                                                                        }
+                                                                        finally
+                                                                        {
+                                                                            cFindObjectsFinal(hSession);
+                                                                        }
+                                                                    }
+                                                                }
+                                                                finally
+                                                                {
+                                                                    if (loggedIn && cLogout != null)
+                                                                    {
+                                                                        cLogout(hSession);
+                                                                    }
+                                                                    Marshal.FreeHGlobal(pClassVal);
+                                                                }
+                                                            }
+                                                            finally
+                                                            {
+                                                                cCloseSession(hSession);
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                            finally
+                                            {
+                                                Marshal.FreeHGlobal(pSlots);
+                                            }
+                                        }
+                                    }
+                                    finally
+                                    {
+                                        cFinalize(IntPtr.Zero);
+                                    }
+                                }
+                            }
+                            catch {}
+                            finally
+                            {
+                                Win32.FreeLibrary(hModule);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[DEBUG_PKCS11_ERR] Loi tim kiem PKCS11: {ex.Message}");
+        }
+        return null;
+    }
 }
 
 public class CngUserSignature : IExternalSignature
@@ -638,12 +1720,14 @@ public class CngUserSignature : IExternalSignature
     private X509Certificate2 _cert;
     private string _pin;
     private string _hashAlgorithm;
+    private string _pinFormat;
 
-    public CngUserSignature(X509Certificate2 cert, string pin, string hashAlgorithm)
+    public CngUserSignature(X509Certificate2 cert, string pin, string hashAlgorithm, string pinFormat = null)
     {
         _cert = cert;
         _pin = pin;
         _hashAlgorithm = hashAlgorithm.ToUpper().Replace("-", "");
+        _pinFormat = pinFormat;
     }
 
     public string GetHashAlgorithm()
@@ -724,88 +1808,7 @@ public class CngUserSignature : IExternalSignature
         return readers;
     }
 
-    public static RSA GetSilentRsaKey(X509Certificate2 cert, string pin)
-    {
-        var tempSigObj = new CngUserSignature(cert, pin, "SHA256");
-        CRYPT_KEY_PROV_INFO? provInfoOpt = tempSigObj.GetKeyProvInfo();
-        if (provInfoOpt == null)
-        {
-            return cert.GetRSAPrivateKey();
-        }
-
-        var provInfo = provInfoOpt.Value;
-
-        if (provInfo.dwProvType > 0)
-        {
-            try
-            {
-                CspParameters cspParamsSilent = new CspParameters
-                {
-                    ProviderName = provInfo.pwszProvName,
-                    ProviderType = (int)provInfo.dwProvType,
-                    KeyContainerName = provInfo.pwszContainerName,
-                    Flags = CspProviderFlags.UseExistingKey | CspProviderFlags.NoPrompt
-                };
-
-                if (!string.IsNullOrEmpty(pin))
-                {
-                    SecureString securePin = new SecureString();
-                    foreach (char c in pin) securePin.AppendChar(c);
-                    cspParamsSilent.KeyPassword = securePin;
-                }
-
-                var rsaCsp = new RSACryptoServiceProvider(cspParamsSilent);
-                if (!string.IsNullOrEmpty(pin))
-                {
-                    tempSigObj.SetCspPin(rsaCsp, pin, false);
-                }
-                return rsaCsp;
-            }
-            catch
-            {
-                CspParameters cspParamsInteractive = new CspParameters
-                {
-                    ProviderName = provInfo.pwszProvName,
-                    ProviderType = (int)provInfo.dwProvType,
-                    KeyContainerName = provInfo.pwszContainerName,
-                    Flags = CspProviderFlags.UseExistingKey
-                };
-
-                if (!string.IsNullOrEmpty(pin))
-                {
-                    SecureString securePin = new SecureString();
-                    foreach (char c in pin) securePin.AppendChar(c);
-                    cspParamsInteractive.KeyPassword = securePin;
-                }
-
-                var rsaCsp = new RSACryptoServiceProvider(cspParamsInteractive);
-                if (!string.IsNullOrEmpty(pin))
-                {
-                    tempSigObj.SetCspPin(rsaCsp, pin, false);
-                }
-                return rsaCsp;
-            }
-        }
-        else
-        {
-            CngProvider cngProvider = new CngProvider(provInfo.pwszProvName);
-            CngKey cngKey = CngKey.Open(provInfo.pwszContainerName, cngProvider, CngKeyOpenOptions.Silent);
-            if (!string.IsNullOrEmpty(pin))
-            {
-                try
-                {
-                    tempSigObj.SetCngPin(cngKey, pin, true);
-                }
-                catch
-                {
-                    tempSigObj.SetCngPin(cngKey, pin, false);
-                }
-            }
-            return new RSACng(cngKey);
-        }
-    }
-
-    private void SetCspPin(RSACryptoServiceProvider rsaCsp, string pin, bool isUnicode)
+    private void SetCspPin(RSACryptoServiceProvider rsaCsp, string pin, bool isUnicode, bool withNull = true)
     {
         var field = typeof(RSACryptoServiceProvider).GetField("_safeProvHandle", BindingFlags.NonPublic | BindingFlags.Instance);
         if (field != null)
@@ -814,15 +1817,19 @@ public class CngUserSignature : IExternalSignature
             if (safeHandle != null)
             {
                 IntPtr hProv = safeHandle.DangerousGetHandle();
-                byte[] pinBytes = isUnicode ? Encoding.Unicode.GetBytes(pin + '\0') : Encoding.ASCII.GetBytes(pin + '\0');
+                string finalPin = withNull ? pin + '\0' : pin;
+                byte[] pinBytes = isUnicode ? Encoding.Unicode.GetBytes(finalPin) : Encoding.ASCII.GetBytes(finalPin);
                 
                 // 1. Thiet lap tren Provider
                 bool retSigProv = CryptSetProvParam(hProv, PP_SIGNATURE_PIN, pinBytes, 0);
+                int errSigProv = retSigProv ? 0 : Marshal.GetLastWin32Error();
+                
                 bool retKeyProv = CryptSetProvParam(hProv, PP_KEYEXCHANGE_PIN, pinBytes, 0);
-                Console.WriteLine($"[DEBUG] CryptSetProvParam isUnicode={isUnicode}: PP_SIGNATURE_PIN: {retSigProv}, PP_KEYEXCHANGE_PIN: {retKeyProv}");
+                int errKeyProv = retKeyProv ? 0 : Marshal.GetLastWin32Error();
+                
+                Console.WriteLine($"[DEBUG] CryptSetProvParam isUnicode={isUnicode} withNull={withNull}: PP_SIGNATURE_PIN: {retSigProv} (err: 0x{errSigProv:X}), PP_KEYEXCHANGE_PIN: {retKeyProv} (err: 0x{errKeyProv:X})");
 
                 // 2. Thiet lap tren Key (KP_SIGNATURE_PIN/KP_KEYEXCHANGE_PIN)
-                // Thu ca 2 loai khoa AT_SIGNATURE (2) va AT_KEYEXCHANGE (1)
                 uint[] keySpecs = { 2, 1 };
                 foreach (uint spec in keySpecs)
                 {
@@ -832,22 +1839,42 @@ public class CngUserSignature : IExternalSignature
                         try
                         {
                             bool retSigKey = CryptSetKeyParam(hKey, 33, pinBytes, 0); // KP_SIGNATURE_PIN = 33
+                            int errSigKey = retSigKey ? 0 : Marshal.GetLastWin32Error();
+                            
                             bool retKeyKey = CryptSetKeyParam(hKey, 32, pinBytes, 0); // KP_KEYEXCHANGE_PIN = 32
-                            Console.WriteLine($"[DEBUG] CryptSetKeyParam spec={spec} isUnicode={isUnicode}: KP_SIGNATURE_PIN: {retSigKey}, KP_KEYEXCHANGE_PIN: {retKeyKey}");
+                            int errKeyKey = retKeyKey ? 0 : Marshal.GetLastWin32Error();
+                            
+                            Console.WriteLine($"[DEBUG] CryptSetKeyParam spec={spec} isUnicode={isUnicode} withNull={withNull}: KP_SIGNATURE_PIN: {retSigKey} (err: 0x{errSigKey:X}), KP_KEYEXCHANGE_PIN: {retKeyKey} (err: 0x{errKeyKey:X})");
                         }
                         finally
                         {
                             CryptDestroyKey(hKey);
                         }
                     }
+                    else
+                    {
+                        int errGetUserKey = Marshal.GetLastWin32Error();
+                        Console.WriteLine($"[DEBUG] CryptGetUserKey spec={spec} failed (err: 0x{errGetUserKey:X})");
+                    }
                 }
             }
         }
     }
 
-    private void SetCngPin(CngKey cngKey, string pin, bool isUnicode)
+    private void SetCngSilent(CngKey cngKey)
     {
-        byte[] pinBytes = isUnicode ? Encoding.Unicode.GetBytes(pin + '\0') : Encoding.ASCII.GetBytes(pin + '\0');
+        try
+        {
+            CngProperty silentProp = new CngProperty("Silent", new byte[] { 1, 0, 0, 0 }, CngPropertyOptions.None);
+            cngKey.SetProperty(silentProp);
+        }
+        catch {}
+    }
+
+    private void SetCngPin(CngKey cngKey, string pin, bool isUnicode, bool withNull = true)
+    {
+        string finalPin = withNull ? pin + '\0' : pin;
+        byte[] pinBytes = isUnicode ? Encoding.Unicode.GetBytes(finalPin) : Encoding.ASCII.GetBytes(finalPin);
         CngProperty pinProperty = new CngProperty("SmartCardPin", pinBytes, CngPropertyOptions.None);
         cngKey.SetProperty(pinProperty);
     }
@@ -856,6 +1883,54 @@ public class CngUserSignature : IExternalSignature
     {
         Console.WriteLine("[DEBUG] Bat dau phuong thuc Sign...");
         Console.WriteLine($"[DEBUG] Sign: pin length = {(_pin != null ? _pin.Length : 0)}");
+
+        if (!string.IsNullOrEmpty(_pin))
+        {
+            try
+            {
+                using (RSA rsa = _cert.GetRSAPrivateKey())
+                {
+                    RSACng rsaCng = rsa as RSACng;
+                    if (rsaCng != null)
+                    {
+                        Console.WriteLine("[DEBUG] GetRSAPrivateKey la RSACng. Dang thu thiet lap PIN qua CNG...");
+                        SetCngSilent(rsaCng.Key);
+
+                        List<string> formats = new List<string> { "asc-raw", "uni-raw", "asc-null", "uni-null" };
+                        if (!string.IsNullOrEmpty(_pinFormat) && formats.Contains(_pinFormat))
+                        {
+                            formats.Remove(_pinFormat);
+                            formats.Insert(0, _pinFormat);
+                            Console.WriteLine($"[DEBUG] Uu tien thu PIN format da cache tu truoc: {_pinFormat}");
+                        }
+
+                        foreach (var fmt in formats)
+                        {
+                            try
+                            {
+                                Console.WriteLine($"[DEBUG] Set PIN CNG dinh dang: {fmt}...");
+                                bool isUnicode = fmt.StartsWith("uni");
+                                bool withNull = fmt.EndsWith("null");
+                                SetCngPin(rsaCng.Key, _pin, isUnicode, withNull);
+                                byte[] sig = rsaCng.SignData(message, new HashAlgorithmName(_hashAlgorithm), RSASignaturePadding.Pkcs1);
+                                
+                                Console.WriteLine($"[SUCCESS_FORMAT] {fmt}");
+                                Console.WriteLine($"[DEBUG] Ky bang RSACng ({fmt}) thanh cong.");
+                                return sig;
+                            }
+                            catch (Exception ex)
+                            {
+                                Console.WriteLine($"[DEBUG] Thu PIN CNG dinh dang {fmt} loi: {ex.Message}");
+                            }
+                        }
+                    }
+                }
+            }
+            catch (Exception exCngGeneric)
+            {
+                Console.WriteLine($"[DEBUG] Luong uu tien GetRSAPrivateKey loi generic: {exCngGeneric.Message}. Chuyen sang luong du phong CAPI...");
+            }
+        }
 
         CRYPT_KEY_PROV_INFO? provInfoOpt = GetKeyProvInfo();
         if (provInfoOpt == null)
@@ -872,50 +1947,158 @@ public class CngUserSignature : IExternalSignature
         var provInfo = provInfoOpt.Value;
         Console.WriteLine($"[DEBUG] KeyProvInfo: Container={provInfo.pwszContainerName}, Provider={provInfo.pwszProvName}, Type={provInfo.dwProvType}");
 
-        // 1. NEU LA CSP TRUYEN THONG (dwProvType > 0) -> Bat buoc dung luong CSP de tuong thich driver tot nhat
+        // 1. NEU LA CSP TRUYEN THONG (dwProvType > 0)
         if (provInfo.dwProvType > 0)
         {
-            Console.WriteLine("[DEBUG] Uu tien luong CSP cho khoa Type > 0...");
+            if (!string.IsNullOrEmpty(_pin))
+            {
+                try
+                {
+                    Console.WriteLine("[DEBUG] Thu dung CNG qua Microsoft Smart Card KSP cho khoa CSP...");
+                    string kspName = "Microsoft Smart Card Key Storage Provider";
+                    CngProvider cngProvider = new CngProvider(kspName);
+                    
+                    var readers = GetReaderNames();
+                    Console.WriteLine($"[DEBUG] So luong reader phat hien: {readers.Count}");
+                    
+                    foreach (var reader in readers)
+                    {
+                        string cngContainerName = $"\\\\.\\{reader}\\{provInfo.pwszContainerName}";
+                        try
+                        {
+                            Console.WriteLine($"[DEBUG] Thu mo CngKey voi container: {cngContainerName}");
+                            using (CngKey cngKey = CngKey.Open(cngContainerName, cngProvider, CngKeyOpenOptions.Silent))
+                            {
+                                List<string> cngFormats = new List<string> { "uni-raw", "asc-raw", "uni-null", "asc-null" };
+                                if (!string.IsNullOrEmpty(_pinFormat) && cngFormats.Contains(_pinFormat))
+                                {
+                                    cngFormats.Remove(_pinFormat);
+                                    cngFormats.Insert(0, _pinFormat);
+                                }
+
+                                foreach (var fmt in cngFormats)
+                                {
+                                    try
+                                    {
+                                        Console.WriteLine($"[DEBUG] Thu CNG PIN format {fmt} tren KSP...");
+                                        bool isUnicode = fmt.StartsWith("uni");
+                                        bool withNull = fmt.EndsWith("null");
+                                        SetCngPin(cngKey, _pin, isUnicode, withNull);
+                                        using (var rsaCng = new RSACng(cngKey))
+                                        {
+                                            byte[] sig = rsaCng.SignData(message, new HashAlgorithmName(_hashAlgorithm), RSASignaturePadding.Pkcs1);
+                                            Console.WriteLine($"[SUCCESS_FORMAT] {fmt}");
+                                            Console.WriteLine($"[DEBUG] Ky CNG qua Microsoft Smart Card KSP ({fmt}) thanh cong.");
+                                            return sig;
+                                        }
+                                    }
+                                    catch (Exception exCngFmt)
+                                    {
+                                        Console.WriteLine($"[DEBUG] Dinh dang {fmt} loi: {exCngFmt.Message}");
+                                    }
+                                }
+                            }
+                        }
+                        catch (Exception exCngOpen)
+                        {
+                            Console.WriteLine($"[DEBUG] Khong the mo CngKey cho reader {reader}: {exCngOpen.Message}");
+                        }
+                    }
+                }
+                catch (Exception exCngKsp)
+                {
+                    Console.WriteLine($"[DEBUG] Luong CNG KSP that bai: {exCngKsp.Message}. Tiep tuc sang luong CSP truyen thong...");
+                }
+            }
+
+            var cspTests = new List<(bool UseKeyPassword, string Format)>
+            {
+                (false, "asc-raw"),
+                (false, "asc-null"),
+                (false, "uni-raw"),
+                (false, "uni-null"),
+                (true, "none"),
+                (true, "asc-raw"),
+                (true, "asc-null"),
+                (true, "uni-raw"),
+                (true, "uni-null")
+            };
+
+            foreach (var test in cspTests)
+            {
+                try
+                {
+                    Console.WriteLine($"[DEBUG] Thu CSP NoPrompt: UseKeyPassword={test.UseKeyPassword}, Format={test.Format}...");
+                    CspParameters cspParamsSilent = new CspParameters
+                    {
+                        ProviderName = provInfo.pwszProvName,
+                        ProviderType = (int)provInfo.dwProvType,
+                        KeyContainerName = provInfo.pwszContainerName,
+                        Flags = CspProviderFlags.UseExistingKey | CspProviderFlags.NoPrompt
+                    };
+
+                    if (test.UseKeyPassword && !string.IsNullOrEmpty(_pin))
+                    {
+                        SecureString securePin = new SecureString();
+                        foreach (char c in _pin) securePin.AppendChar(c);
+                        cspParamsSilent.KeyPassword = securePin;
+                    }
+
+                    using (var rsaCsp = new RSACryptoServiceProvider(cspParamsSilent))
+                    {
+                        if (test.Format != "none" && !string.IsNullOrEmpty(_pin))
+                        {
+                            bool isUnicode = test.Format.StartsWith("uni");
+                            bool withNull = test.Format.EndsWith("null");
+                            SetCspPin(rsaCsp, _pin, isUnicode, withNull);
+                        }
+                        byte[] sig = rsaCsp.SignData(message, new HashAlgorithmName(_hashAlgorithm), RSASignaturePadding.Pkcs1);
+                        Console.WriteLine($"[SUCCESS_CSP_NOPROMPT] UseKeyPassword={test.UseKeyPassword}, Format={test.Format} thanh cong!");
+                        return sig;
+                    }
+                }
+                catch (Exception exCspFmt)
+                {
+                    Console.WriteLine($"[DEBUG] Thu CSP NoPrompt (UseKeyPassword={test.UseKeyPassword}, Format={test.Format}) loi: {exCspFmt.Message}");
+                }
+            }
+
+            Console.WriteLine("[DEBUG] Luong CSP NoPrompt that bai hoàn toàn. Thu lai voi luong CSP tuong tac...");
             
-            // A. Thu voi NoPrompt (Silent) + KeyPassword + CryptSetProvParam truoc
+            // B1. Thu voi tuong tac (khong NoPrompt) + KeyPassword + CryptSetProvParam (Unicode)
             try
             {
-                Console.WriteLine("[DEBUG] Thu CSP voi NoPrompt + KeyPassword + CryptSetProvParam (ASCII)...");
-                CspParameters cspParamsSilent = new CspParameters
+                CspParameters cspParamsInteractive = new CspParameters
                 {
                     ProviderName = provInfo.pwszProvName,
                     ProviderType = (int)provInfo.dwProvType,
                     KeyContainerName = provInfo.pwszContainerName,
-                    Flags = CspProviderFlags.UseExistingKey | CspProviderFlags.NoPrompt
+                    Flags = CspProviderFlags.UseExistingKey
                 };
 
                 if (!string.IsNullOrEmpty(_pin))
                 {
                     SecureString securePin = new SecureString();
-                    foreach (char c in _pin)
-                    {
-                        securePin.AppendChar(c);
-                    }
-                    cspParamsSilent.KeyPassword = securePin;
+                    foreach (char c in _pin) securePin.AppendChar(c);
+                    cspParamsInteractive.KeyPassword = securePin;
                 }
 
-                using (var rsaCsp = new RSACryptoServiceProvider(cspParamsSilent))
+                using (var rsaCsp = new RSACryptoServiceProvider(cspParamsInteractive))
                 {
                     if (!string.IsNullOrEmpty(_pin))
                     {
-                        SetCspPin(rsaCsp, _pin, false);
+                        SetCspPin(rsaCsp, _pin, true, true);
                     }
                     byte[] sig = rsaCsp.SignData(message, new HashAlgorithmName(_hashAlgorithm), RSASignaturePadding.Pkcs1);
-                    Console.WriteLine("[DEBUG] Ky CSP NoPrompt (ASCII) thanh cong.");
+                    Console.WriteLine("[DEBUG] Ky CSP Interactive + KeyPassword + CryptSetProvParam (Unicode) thanh cong.");
                     return sig;
                 }
             }
-            catch (CryptographicException ex) when (ex.Message.Contains("silent") || ex.Message.Contains("0x80090022") || ex.Message.Contains("0x8009001A"))
+            catch (Exception exUnicodeInteractive)
             {
-                Console.WriteLine("[DEBUG] Ky CSP NoPrompt that bai (silent). Thu lai voi luong CSP tuong tac (khong NoPrompt) + KeyPassword + CryptSetProvParam...");
+                Console.WriteLine($"[DEBUG] Ky CSP Interactive (Unicode) that bai: {exUnicodeInteractive.Message}. Thu tiep voi Interactive (ASCII)...");
                 
-                // B. Thu voi tuong tac (khong NoPrompt) + KeyPassword + CryptSetProvParam
-                // Neu PIN dung, driver se tu dong dung PIN va ky ngam ma khong hien bat ky UI nao
+                // B2. Thu voi tuong tac (khong NoPrompt) + KeyPassword + CryptSetProvParam (ASCII)
                 try
                 {
                     CspParameters cspParamsInteractive = new CspParameters
@@ -923,16 +2106,13 @@ public class CngUserSignature : IExternalSignature
                         ProviderName = provInfo.pwszProvName,
                         ProviderType = (int)provInfo.dwProvType,
                         KeyContainerName = provInfo.pwszContainerName,
-                        Flags = CspProviderFlags.UseExistingKey // KHONG dung NoPrompt
+                        Flags = CspProviderFlags.UseExistingKey
                     };
 
                     if (!string.IsNullOrEmpty(_pin))
                     {
                         SecureString securePin = new SecureString();
-                        foreach (char c in _pin)
-                        {
-                            securePin.AppendChar(c);
-                        }
+                        foreach (char c in _pin) securePin.AppendChar(c);
                         cspParamsInteractive.KeyPassword = securePin;
                     }
 
@@ -940,16 +2120,16 @@ public class CngUserSignature : IExternalSignature
                     {
                         if (!string.IsNullOrEmpty(_pin))
                         {
-                            SetCspPin(rsaCsp, _pin, false);
+                            SetCspPin(rsaCsp, _pin, false, true);
                         }
                         byte[] sig = rsaCsp.SignData(message, new HashAlgorithmName(_hashAlgorithm), RSASignaturePadding.Pkcs1);
                         Console.WriteLine("[DEBUG] Ky CSP Interactive + KeyPassword + CryptSetProvParam (ASCII) thanh cong.");
                         return sig;
                     }
                 }
-                catch (Exception innerEx)
+                catch (Exception exAsciiInteractive)
                 {
-                    Console.WriteLine($"[DEBUG] Thu CSP Interactive loi: {innerEx.Message}");
+                    Console.WriteLine($"[DEBUG] Ky CSP Interactive (ASCII) that bai: {exAsciiInteractive.Message}");
                     throw;
                 }
             }
@@ -1008,6 +2188,153 @@ public class CngUserSignature : IExternalSignature
                     }
                 }
             }
+        }
+    }
+
+    public static RSA GetSilentRsaKey(X509Certificate2 cert, string pin)
+    {
+        var tempSigObj = new CngUserSignature(cert, pin, "SHA256");
+        CRYPT_KEY_PROV_INFO? provInfoOpt = tempSigObj.GetKeyProvInfo();
+        if (provInfoOpt == null)
+        {
+            return cert.GetRSAPrivateKey();
+        }
+
+        var provInfo = provInfoOpt.Value;
+
+        if (provInfo.dwProvType > 0)
+        {
+            if (!string.IsNullOrEmpty(pin))
+            {
+                try
+                {
+                    string kspName = "Microsoft Smart Card Key Storage Provider";
+                    CngProvider cngProvider = new CngProvider(kspName);
+                    
+                    var readers = tempSigObj.GetReaderNames();
+                    foreach (var reader in readers)
+                    {
+                        string cngContainerName = $"\\\\.\\{reader}\\{provInfo.pwszContainerName}";
+                        try
+                        {
+                            CngKey cngKey = CngKey.Open(cngContainerName, cngProvider, CngKeyOpenOptions.Silent);
+                            try
+                            {
+                                tempSigObj.SetCngPin(cngKey, pin, true);
+                            }
+                            catch
+                            {
+                                tempSigObj.SetCngPin(cngKey, pin, false);
+                            }
+                            var rsaCng = new RSACng(cngKey);
+                            Console.WriteLine("[DEBUG] GetSilentRsaKey: Da tao RSACng qua KSP thanh cong.");
+                            return rsaCng;
+                        }
+                        catch {}
+                    }
+                }
+                catch (Exception exCng)
+                {
+                    Console.WriteLine($"[DEBUG] GetSilentRsaKey: Thu CNG KSP loi: {exCng.Message}. Fallback sang CSP...");
+                }
+            }
+
+            var cspTests = new List<(bool UseKeyPassword, string Format)>
+            {
+                (false, "asc-raw"),
+                (false, "asc-null"),
+                (false, "uni-raw"),
+                (false, "uni-null"),
+                (true, "none"),
+                (true, "asc-raw"),
+                (true, "asc-null"),
+                (true, "uni-raw"),
+                (true, "uni-null")
+            };
+
+            foreach (var test in cspTests)
+            {
+                try
+                {
+                    Console.WriteLine($"[DEBUG] GetSilentRsaKey: Thu CSP NoPrompt: UseKeyPassword={test.UseKeyPassword}, Format={test.Format}...");
+                    CspParameters cspParamsSilent = new CspParameters
+                    {
+                        ProviderName = provInfo.pwszProvName,
+                        ProviderType = (int)provInfo.dwProvType,
+                        KeyContainerName = provInfo.pwszContainerName,
+                        Flags = CspProviderFlags.UseExistingKey | CspProviderFlags.NoPrompt
+                    };
+
+                    if (test.UseKeyPassword && !string.IsNullOrEmpty(pin))
+                    {
+                        SecureString securePin = new SecureString();
+                        foreach (char c in pin) securePin.AppendChar(c);
+                        cspParamsSilent.KeyPassword = securePin;
+                    }
+
+                    var rsaCsp = new RSACryptoServiceProvider(cspParamsSilent);
+                    if (test.Format != "none" && !string.IsNullOrEmpty(pin))
+                    {
+                        bool isUnicode = test.Format.StartsWith("uni");
+                        bool withNull = test.Format.EndsWith("null");
+                        tempSigObj.SetCspPin(rsaCsp, pin, isUnicode, withNull);
+                    }
+                    Console.WriteLine($"[SUCCESS_GET_SILENT_KEY] UseKeyPassword={test.UseKeyPassword}, Format={test.Format} thanh cong!");
+                    return rsaCsp;
+                }
+                catch (Exception exCspFmt)
+                {
+                    Console.WriteLine($"[DEBUG] GetSilentRsaKey: Test (UseKeyPassword={test.UseKeyPassword}, Format={test.Format}) loi: {exCspFmt.Message}");
+                }
+            }
+
+            // Fallback sang Interactive neu can
+            try
+            {
+                CspParameters cspParamsInteractive = new CspParameters
+                {
+                    ProviderName = provInfo.pwszProvName,
+                    ProviderType = (int)provInfo.dwProvType,
+                    KeyContainerName = provInfo.pwszContainerName,
+                    Flags = CspProviderFlags.UseExistingKey
+                };
+
+                if (!string.IsNullOrEmpty(pin))
+                {
+                    SecureString securePin = new SecureString();
+                    foreach (char c in pin) securePin.AppendChar(c);
+                    cspParamsInteractive.KeyPassword = securePin;
+                }
+
+                var rsaCsp = new RSACryptoServiceProvider(cspParamsInteractive);
+                if (!string.IsNullOrEmpty(pin))
+                {
+                    tempSigObj.SetCspPin(rsaCsp, pin, false);
+                }
+                return rsaCsp;
+            }
+            catch (Exception exInteractive)
+            {
+                Console.WriteLine($"[DEBUG] GetSilentRsaKey: Fallback Interactive loi: {exInteractive.Message}");
+                throw;
+            }
+        }
+        else
+        {
+            CngProvider cngProvider = new CngProvider(provInfo.pwszProvName);
+            CngKey cngKey = CngKey.Open(provInfo.pwszContainerName, cngProvider, CngKeyOpenOptions.Silent);
+            if (!string.IsNullOrEmpty(pin))
+            {
+                try
+                {
+                    tempSigObj.SetCngPin(cngKey, pin, true);
+                }
+                catch
+                {
+                    tempSigObj.SetCngPin(cngKey, pin, false);
+                }
+            }
+            return new RSACng(cngKey);
         }
     }
 }
@@ -1280,12 +2607,13 @@ public class Pkcs11Signature : IExternalSignature
             }
             finally
             {
-                cFinalize(IntPtr.Zero);
+                // Bo qua cFinalize va FreeLibrary khi thoat de tranh deadlock driver
+                // cFinalize(IntPtr.Zero);
             }
         }
         finally
         {
-            Win32.FreeLibrary(hModule);
+            // Win32.FreeLibrary(hModule);
         }
     }
 
@@ -1478,6 +2806,12 @@ public static class Win32
 
     [DllImport("kernel32.dll", SetLastError = true)]
     public static extern bool FreeLibrary(IntPtr hModule);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    public static extern bool TerminateProcess(IntPtr hProcess, uint uExitCode);
+
+    [DllImport("kernel32.dll")]
+    public static extern IntPtr GetCurrentProcess();
 }
 
 public static class Pkcs11Const
@@ -1489,7 +2823,7 @@ public static class Pkcs11Const
     public const uint CKF_SERIAL_SESSION = 0x00000004;
 }
 
-[StructLayout(LayoutKind.Sequential)]
+[StructLayout(LayoutKind.Sequential, Pack = 1)]
 public struct CK_ATTRIBUTE
 {
     public uint type;
@@ -1497,7 +2831,7 @@ public struct CK_ATTRIBUTE
     public uint ulValueLen;
 }
 
-[StructLayout(LayoutKind.Sequential)]
+[StructLayout(LayoutKind.Sequential, Pack = 1)]
 public struct CK_MECHANISM
 {
     public uint mechanism;
@@ -1593,4 +2927,199 @@ public class Pkcs11Rsa : RSA
         }
         base.Dispose(disposing);
     }
+}
+
+public class TextAnchorFinder : iTextSharp.text.pdf.parser.IRenderListener
+{
+    private class CharInfo
+    {
+        public string Text;
+        public float X;
+        public float Y;
+        public float EndX;
+        public float Height;
+    }
+
+    private readonly string _targetText;
+    private readonly List<CharInfo> _charList = new List<CharInfo>();
+
+    public float? FoundX { get; private set; }
+    public float? FoundY { get; private set; }
+    public float? FoundEndX { get; private set; }
+    public float? FoundHeight { get; private set; }
+    public int FoundPage { get; private set; } = 1;
+
+    public TextAnchorFinder(string targetText)
+    {
+        _targetText = targetText;
+    }
+
+    public void SetPage(int page)
+    {
+        FoundPage = page;
+        FoundX = null;
+        FoundY = null;
+        FoundEndX = null;
+        FoundHeight = null;
+        _charList.Clear();
+    }
+
+    public void RenderText(iTextSharp.text.pdf.parser.TextRenderInfo renderInfo)
+    {
+        if (FoundX.HasValue || string.IsNullOrEmpty(_targetText)) return;
+
+        string text = renderInfo.GetText();
+        if (string.IsNullOrEmpty(text)) return;
+
+        // Route 1: Chunk truyen thong chua khap tu khoa (Case-insensitive check)
+        int directIdx = text.IndexOf(_targetText, StringComparison.OrdinalIgnoreCase);
+        if (directIdx >= 0)
+        {
+            var segment = renderInfo.GetBaseline();
+            FoundX = segment.GetStartPoint()[iTextSharp.text.pdf.parser.Vector.I1];
+            FoundY = segment.GetStartPoint()[iTextSharp.text.pdf.parser.Vector.I2];
+            FoundEndX = segment.GetEndPoint()[iTextSharp.text.pdf.parser.Vector.I1];
+            
+            float h = 10f;
+            try
+            {
+                float ascentY = renderInfo.GetAscentLine().GetStartPoint()[iTextSharp.text.pdf.parser.Vector.I2];
+                float descentY = renderInfo.GetDescentLine().GetStartPoint()[iTextSharp.text.pdf.parser.Vector.I2];
+                h = Math.Abs(ascentY - descentY);
+            }
+            catch {}
+            FoundHeight = h;
+            return;
+        }
+
+        // Route 2: Thu thap chi tiet tung ky tu de ho tro truong hop tu khoa bi split thanh nhieu chunk khoi PDF stream
+        try
+        {
+            var subInfos = renderInfo.GetCharacterRenderInfos();
+            if (subInfos != null && subInfos.Count > 0)
+            {
+                foreach (var charInfo in subInfos)
+                {
+                    string cText = charInfo.GetText();
+                    if (!string.IsNullOrEmpty(cText))
+                    {
+                        var seg = charInfo.GetBaseline();
+                        float h = 10f;
+                        try
+                        {
+                            float ascentY = charInfo.GetAscentLine().GetStartPoint()[iTextSharp.text.pdf.parser.Vector.I2];
+                            float descentY = charInfo.GetDescentLine().GetStartPoint()[iTextSharp.text.pdf.parser.Vector.I2];
+                            h = Math.Abs(ascentY - descentY);
+                        }
+                        catch {}
+
+                        _charList.Add(new CharInfo
+                        {
+                            Text = cText,
+                            X = seg.GetStartPoint()[iTextSharp.text.pdf.parser.Vector.I1],
+                            Y = seg.GetStartPoint()[iTextSharp.text.pdf.parser.Vector.I2],
+                            EndX = seg.GetEndPoint()[iTextSharp.text.pdf.parser.Vector.I1],
+                            Height = h
+                        });
+                    }
+                }
+            }
+            else
+            {
+                var seg = renderInfo.GetBaseline();
+                float x = seg.GetStartPoint()[iTextSharp.text.pdf.parser.Vector.I1];
+                float y = seg.GetStartPoint()[iTextSharp.text.pdf.parser.Vector.I2];
+                float endX = seg.GetEndPoint()[iTextSharp.text.pdf.parser.Vector.I1];
+                float h = 10f;
+                try
+                {
+                    float ascentY = renderInfo.GetAscentLine().GetStartPoint()[iTextSharp.text.pdf.parser.Vector.I2];
+                    float descentY = renderInfo.GetDescentLine().GetStartPoint()[iTextSharp.text.pdf.parser.Vector.I2];
+                    h = Math.Abs(ascentY - descentY);
+                }
+                catch {}
+
+                foreach (char c in text)
+                {
+                    _charList.Add(new CharInfo { Text = c.ToString(), X = x, Y = y, EndX = endX, Height = h });
+                }
+            }
+        }
+        catch
+        {
+            var seg = renderInfo.GetBaseline();
+            float x = seg.GetStartPoint()[iTextSharp.text.pdf.parser.Vector.I1];
+            float y = seg.GetStartPoint()[iTextSharp.text.pdf.parser.Vector.I2];
+            float endX = seg.GetEndPoint()[iTextSharp.text.pdf.parser.Vector.I1];
+            float h = 10f;
+            try
+            {
+                float ascentY = renderInfo.GetAscentLine().GetStartPoint()[iTextSharp.text.pdf.parser.Vector.I2];
+                float descentY = renderInfo.GetDescentLine().GetStartPoint()[iTextSharp.text.pdf.parser.Vector.I2];
+                h = Math.Abs(ascentY - descentY);
+            }
+            catch {}
+
+            foreach (char c in text)
+            {
+                _charList.Add(new CharInfo { Text = c.ToString(), X = x, Y = y, EndX = endX, Height = h });
+            }
+        }
+    }
+
+    public void OnPageEnd()
+    {
+        if (FoundX.HasValue || _charList.Count == 0 || string.IsNullOrEmpty(_targetText)) return;
+
+        // Build toan bo text cua trang
+        StringBuilder sb = new StringBuilder();
+        foreach (var ci in _charList)
+        {
+            sb.Append(ci.Text);
+        }
+        string fullPageText = sb.ToString();
+
+        // 1. Tim truc tiep chuoi (khong phan biet hoa thuong)
+        int idx = fullPageText.IndexOf(_targetText, StringComparison.OrdinalIgnoreCase);
+        if (idx >= 0 && idx < _charList.Count)
+        {
+            FoundX = _charList[idx].X;
+            FoundY = _charList[idx].Y;
+            int endIdx = Math.Min(idx + _targetText.Length - 1, _charList.Count - 1);
+            FoundEndX = _charList[endIdx].EndX;
+            FoundHeight = _charList[idx].Height;
+            return;
+        }
+
+        // 2. Thu lai neu tu khoa va text trang co the bi ngan cach bang khoang trang/dinh dang
+        string targetTrimmed = _targetText.Replace(" ", "").Replace("\t", "");
+        if (!string.IsNullOrEmpty(targetTrimmed))
+        {
+            StringBuilder sbNoSpace = new StringBuilder();
+            List<int> origIndices = new List<int>();
+            for (int i = 0; i < _charList.Count; i++)
+            {
+                if (_charList[i].Text != " " && _charList[i].Text != "\t" && _charList[i].Text != "\r" && _charList[i].Text != "\n")
+                {
+                    sbNoSpace.Append(_charList[i].Text);
+                    origIndices.Add(i);
+                }
+            }
+
+            int idxNoSpace = sbNoSpace.ToString().IndexOf(targetTrimmed, StringComparison.OrdinalIgnoreCase);
+            if (idxNoSpace >= 0 && idxNoSpace < origIndices.Count)
+            {
+                int origIdx = origIndices[idxNoSpace];
+                FoundX = _charList[origIdx].X;
+                FoundY = _charList[origIdx].Y;
+                int endOrigIdx = origIndices[Math.Min(idxNoSpace + targetTrimmed.Length - 1, origIndices.Count - 1)];
+                FoundEndX = _charList[endOrigIdx].EndX;
+                FoundHeight = _charList[origIdx].Height;
+            }
+        }
+    }
+
+    public void BeginTextBlock() {}
+    public void EndTextBlock() {}
+    public void RenderImage(iTextSharp.text.pdf.parser.ImageRenderInfo renderInfo) {}
 }
