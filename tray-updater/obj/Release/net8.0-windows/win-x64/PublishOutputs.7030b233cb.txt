@@ -1,0 +1,2 @@
+C:\Users\Nguyen Nam\Documents\GitHub\signing-gateway\dist\tray\SigningGateway.Tray.pdb
+C:\Users\Nguyen Nam\Documents\GitHub\signing-gateway\dist\tray\SigningGateway.Tray.exe

@@ -212,6 +212,8 @@ function loadConfig() {
   const cfg = {
     ...DEFAULTS,
     ...file,
+    allowedOrigins: (file.allowedOrigins || DEFAULTS.allowedOrigins || [])
+      .map(o => String(o || '').trim().replace(/\/+$/, '')),
     pluginDomain: normalizeDomain(file.pluginDomain || DEFAULTS.pluginDomain),
     tunnel: { ...DEFAULTS.tunnel, ...(file.tunnel || {}) }, // config cu khong co tunnel
   };
@@ -397,6 +399,73 @@ setInterval(() => {
   const now = Date.now();
   for (const [k, exp] of usedJti) if (exp < now) usedJti.delete(k);
 }, 60e3).unref();
+
+/**
+ * Giai ma PIN AES/GCM/NoPadding (SmartCAEncryptionService / HIS4).
+ * Payload: Base64 cua [IV (12 bytes) + Ciphertext + AuthTag (16 bytes)].
+ * Khoa lay tu hisSharedSecret.
+ * Neu khong phai ma hoa hoac giai ma that bai, tra ve pinStr ban dau (fallback plaintext).
+ */
+function decryptPinAES_GCM(pinStr, secret) {
+  if (!pinStr || typeof pinStr !== 'string') return pinStr || '';
+  const trimmed = pinStr.trim();
+  if (!trimmed || !secret) return trimmed;
+
+  // AES-GCM 12-byte IV + 16-byte Tag toi thieu la 28 bytes (~38+ ky tu Base64)
+  if (trimmed.length < 32) return trimmed;
+
+  let raw;
+  try {
+    const b64 = trimmed.replace(/-/g, '+').replace(/_/g, '/');
+    raw = Buffer.from(b64, 'base64');
+  } catch (_) {
+    return trimmed;
+  }
+
+  // Can it nhat 12 bytes IV + 1 byte data + 16 bytes Tag = 29 bytes
+  if (raw.length < 29) return trimmed;
+
+  const iv = raw.subarray(0, 12);
+  const tag = raw.subarray(raw.length - 16);
+  const ciphertext = raw.subarray(12, raw.length - 16);
+
+  const candidateKeys = [];
+  // 1. Hex string (64 ky tu hex = 32 bytes)
+  if (/^[0-9a-fA-F]{64}$/.test(secret)) {
+    candidateKeys.push({ key: Buffer.from(secret, 'hex'), algo: 'aes-256-gcm' });
+  }
+  // 2. SHA-256 hash cua secret (luon 32 bytes)
+  candidateKeys.push({
+    key: crypto.createHash('sha256').update(secret, 'utf8').digest(),
+    algo: 'aes-256-gcm',
+  });
+  // 3. Raw UTF-8 bytes
+  const utf8 = Buffer.from(secret, 'utf8');
+  if (utf8.length === 32) candidateKeys.push({ key: utf8, algo: 'aes-256-gcm' });
+  else if (utf8.length === 24) candidateKeys.push({ key: utf8, algo: 'aes-192-gcm' });
+  else if (utf8.length === 16) candidateKeys.push({ key: utf8, algo: 'aes-128-gcm' });
+  // 4. Base64 decoded key
+  try {
+    const bKey = Buffer.from(secret, 'base64');
+    if (bKey.length === 32) candidateKeys.push({ key: bKey, algo: 'aes-256-gcm' });
+    else if (bKey.length === 16) candidateKeys.push({ key: bKey, algo: 'aes-128-gcm' });
+  } catch (_) {}
+
+  for (const { key, algo } of candidateKeys) {
+    try {
+      const decipher = crypto.createDecipheriv(algo, key, iv);
+      decipher.setAuthTag(tag);
+      const dec = Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString('utf8');
+      if (dec && dec.length > 0) {
+        log('info', 'Giai ma PIN thanh cong (AES-GCM).');
+        return dec;
+      }
+    } catch (_) {}
+  }
+
+  log('warn', 'Khong the giai ma PIN bang hisSharedSecret, fallback dung nguyen ban.');
+  return trimmed;
+}
 
 /* ================================================================== */
 /* VNPT Plugin client                                                 */
@@ -1465,8 +1534,9 @@ async function signPdfNative(cfg, pdfBase64, opts) {
       throw new Error('THIEU_SERIAL: request phai gui certificateSerial hoac cau hinh mac dinh');
     }
 
-    // Lay PIN tu request, neu khong co thi dung defaultPin trong config
-    const pin = opts.pin || cfg.defaultPin || '';
+    // Lay PIN tu request (ho tro giai ma AES-GCM), neu khong co thi dung defaultPin
+    const rawPin = opts.pin || cfg.defaultPin || '';
+    const pin = decryptPinAES_GCM(rawPin, cfg.hisSharedSecret);
 
     // 4. Chuan bi tham so cho executable
     const args = [
@@ -1564,7 +1634,8 @@ async function signXmlNative(cfg, xmlString, opts) {
       throw new Error('THIEU_SERIAL: request phai gui certificateSerial hoac cau hinh mac dinh');
     }
 
-    const pin = opts.pin || cfg.defaultPin || '';
+    const rawPin = opts.pin || cfg.defaultPin || '';
+    const pin = decryptPinAES_GCM(rawPin, cfg.hisSharedSecret);
 
     const args = [
       '--xml',
@@ -1733,20 +1804,23 @@ function makeHandler(cfg, plugin, queue, tunnel, lock, mutex) {
   const updates = createUpdateLifecycle(cfg);
   return async (req, res) => {
     const p = new URL(req.url, 'http://x').pathname;
-    const origin = req.headers.origin;
+    const origin = (req.headers.origin || '').trim().replace(/\/+$/, '');
+    const isOriginAllowed = Boolean(origin && cfg.allowedOrigins && cfg.allowedOrigins.includes(origin));
 
     /* ---- CORS + Private Network Access ---- */
-    if (origin && cfg.allowedOrigins.includes(origin)) {
+    if (isOriginAllowed) {
       res.setHeader('Access-Control-Allow-Origin', origin);
       res.setHeader('Vary', 'Origin');
+      res.setHeader('Access-Control-Allow-Credentials', 'true');
       res.setHeader('Access-Control-Allow-Private-Network', 'true');
     }
     if (req.method === 'OPTIONS') {
-      if (!origin || !cfg.allowedOrigins.includes(origin)) {
+      if (!isOriginAllowed) {
         return json(res, 403, { error: 'origin khong duoc phep' });
       }
       res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
-      res.setHeader('Access-Control-Allow-Headers', 'content-type,authorization');
+      const reqHeaders = req.headers['access-control-request-headers'];
+      res.setHeader('Access-Control-Allow-Headers', reqHeaders || 'content-type,authorization');
       res.setHeader('Access-Control-Max-Age', '86400');
       res.writeHead(204);
       return res.end();
@@ -1969,6 +2043,9 @@ td{padding:7px 4px;border-bottom:1px solid #eee}td:first-child{color:#777;width:
 
         // Tham so ky trong "signature" (dung chung PDF/XML). Nhan ca "options" (cu).
         const sig = body.signature || body.options || {};
+        if (sig.pin) {
+          sig.pin = decryptPinAES_GCM(sig.pin, cfg.hisSharedSecret);
+        }
         const reqSerial = normalizeSerial(sig.certificateSerial || body.certificateSerial)
                           || normalizeSerial(cfg.certificateSerial);
 
