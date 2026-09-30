@@ -43,7 +43,7 @@ Name: "en"; MessagesFile: "compiler:Default.isl"
 [Files]
 Source: "..\dist\{#ExeName}"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\dist\tray\SigningGateway.Tray.exe"; DestDir: "{app}"; Flags: ignoreversion
-Source: "..\README.md";       DestDir: "{app}"; Flags: ignoreversion isreadme
+Source: "..\DIEU_KHOAN.txt";   DestDir: "{app}"; Flags: ignoreversion isreadme
 ; cloudflared.exe la TUY CHON
 Source: "cloudflared.exe";    DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 ; license.txt: dontcopy = wizard doc luc cai, KHONG cai vao {app}
@@ -90,6 +90,10 @@ Filename: "{sys}\taskkill.exe"; Parameters: "/F /IM SigningGateway.Tray.exe"; Fl
 Filename: "{app}\{#ExeName}"; Parameters: "--uninstall"; \
   WorkingDir: "{app}"; \
   Flags: runhidden waituntilterminated
+
+[InstallDelete]
+Type: files; Name: "{commonstartup}\Signer Gateway.lnk"
+Type: files; Name: "{userstartup}\Signer Gateway.lnk"
 
 [UninstallDelete]
 Type: files; Name: "{commonstartup}\Signer Gateway.lnk"

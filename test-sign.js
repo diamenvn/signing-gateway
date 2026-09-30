@@ -31,8 +31,8 @@ function makeToken() {
   // health
   const resHealth = await (await fetch(`${BASE}/v2/health`)).json();
   const h = resHealth.data;
-  console.log('health:', h);
-  if (h.token !== 'present') { console.log('CHUA CAM USB TOKEN.'); process.exit(1); }
+  console.log('health:', resHealth);
+  if (!h || h.token !== 'present') { console.log('CHUA CAM USB TOKEN.'); process.exit(1); }
 
   const pdfB64 = fs.readFileSync(PDF).toString('base64');
 
@@ -55,7 +55,7 @@ function makeToken() {
       fs.writeFileSync(out, Buffer.from(resSign.data.document, 'base64'));
       console.log(`Lan ${i}: ${ms}ms -> ${out}  ${i > 1 && ms < 4000 ? '(nhanh - con PIN cache)' : ''}`);
     } else {
-      console.log(`Lan ${i}: LOI ${r.status} - ${resSign.error_code}`);
+      console.log(`Lan ${i}: LOI ${r.status} - Code: ${resSign.error_code} - Msg: ${resSign.message}`);
     }
   }
 })();

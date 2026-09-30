@@ -26,7 +26,7 @@ export async function checkGateway() {
     if (!r.ok) return { ok: false, reason: 'Gateway khong phan hoi' };
     const resObj = await r.json();
     const h = resObj.data;
-    if (h.plugin !== 'connected') return { ok: false, reason: 'May chu chua chay VNPT Plugin' };
+    if (!h || h.plugin !== 'connected') return { ok: false, reason: 'May chu chua chay VNPT Plugin' };
     if (h.token === 'absent')     return { ok: false, reason: 'Chua cam USB Token' };
     if (h.token !== 'present')    return { ok: false, reason: 'Khong kiem tra duoc USB Token' };
     return { ok: true };
@@ -73,6 +73,14 @@ export async function signPdf(pdf, opts = {}) {
         imageBase64: opts.imageBase64 ?? undefined,
         setImageBackground: opts.setImageBackground ?? undefined,
         pin: opts.pin ?? undefined,
+        color: opts.color ?? undefined,
+        sigTextSize: opts.sigTextSize ?? undefined,
+        signMark: opts.signMark ?? opts.signmark ?? undefined,
+        smWidth: opts.smWidth ?? opts.width ?? undefined,
+        smHeight: opts.smHeight ?? opts.height ?? undefined,
+        smOffsetX: opts.smOffsetX ?? opts.offsetX ?? undefined,
+        smOffsetY: opts.smOffsetY ?? opts.offsetY ?? undefined,
+        smCenter: opts.smCenter ?? opts.center ?? undefined,
       },
     }),
   });

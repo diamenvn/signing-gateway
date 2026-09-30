@@ -101,7 +101,8 @@ if (-not (Test-Path $NativeSignerProj)) {
 }
 & dotnet publish "$NativeSignerProj" -c Release -r win-x86 --self-contained true -p:PublishSingleFile=true -p:PublishReadyToRun=true -o (Join-Path $Root 'bin')
 if ($LASTEXITCODE -ne 0) { throw 'Bien dich C# native-signer that bai' }
-Write-Host '  pdf-signer.exe: OK' -ForegroundColor Green
+Copy-Item (Join-Path $Root 'font.ttf') (Join-Path $Root 'bin\font.ttf') -Force
+Write-Host '  pdf-signer.exe & font.ttf: OK' -ForegroundColor Green
 
 # --- 4. Dong goi thanh signing-gateway.exe -----------------------------------
 Write-Host '  Dang bien dich ung dung tray cap nhat...' -ForegroundColor Yellow
@@ -151,6 +152,12 @@ if ($isccCode -ne 0) {
 
 $setup = Join-Path $DistDir 'SignerGateway.exe'
 if (-not (Test-Path $setup)) { throw "Khong thay $setup" }
+
+# Xoa file exe tam thoi cua gateway, chi giu lai duy nhat bo cai dat
+if (Test-Path $GatewayEx) {
+    Remove-Item $GatewayEx -Force
+}
+
 $mb = [math]::Round((Get-Item $setup).Length / 1MB, 1)
 
 Write-Host ''
